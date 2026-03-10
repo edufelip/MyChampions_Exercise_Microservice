@@ -136,11 +136,12 @@ jobs:
           set -euo pipefail
           ssh "$VPS_USER@$VPS_HOST" "
             set -euo pipefail; \
+            if ! docker compose version >/dev/null 2>&1; then apt-get update && apt-get install -y docker-compose-v2; fi; \
             echo \"$GHCR_TOKEN\" | docker login ghcr.io -u \"$GHCR_USERNAME\" --password-stdin; \
             cd /opt/exercise-microservice; \
             pm2 delete exercise-microservice >/dev/null 2>&1 || true; \
-            IMAGE_REPO='${{ env.IMAGE_REPO }}' IMAGE_TAG='${IMAGE_TAG}' docker-compose pull api; \
-            IMAGE_REPO='${{ env.IMAGE_REPO }}' IMAGE_TAG='${IMAGE_TAG}' docker-compose up -d; \
+            IMAGE_REPO='${{ env.IMAGE_REPO }}' IMAGE_TAG='${IMAGE_TAG}' docker compose pull api; \
+            IMAGE_REPO='${{ env.IMAGE_REPO }}' IMAGE_TAG='${IMAGE_TAG}' docker compose up -d --remove-orphans; \
             docker image prune -f >/dev/null 2>&1 || true; \
             docker ps --format '{{.Names}}\t{{.Status}}\t{{.Image}}' \
           "
@@ -165,7 +166,7 @@ jobs:
             docker ps -a --format "{{.Names}}\t{{.Status}}\t{{.Image}}"
             echo
             echo "== compose services =="
-            cd /opt/exercise-microservice && docker-compose ps || true
+            cd /opt/exercise-microservice && docker compose ps || true
             echo
             echo "== api logs =="
             docker logs --tail=150 exercise-microservice 2>&1 || true

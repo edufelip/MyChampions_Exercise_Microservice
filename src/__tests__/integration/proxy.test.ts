@@ -42,7 +42,7 @@ const VALID_BODY = {
   request: {
     url: 'https://exercise-api.ymove.app/api/v2/exercises?search=Press',
     method: 'GET',
-    headers: { 'X-API-Key': 'test-key' },
+    headers: { Accept: 'application/json' },
   },
 };
 
@@ -84,6 +84,7 @@ const MOCK_METRICS = {
   cacheHits: 0,
   cacheMisses: 1,
   translationCalls: 1,
+  translatedCharacters: 50,
   durationMs: 42,
 };
 
@@ -126,7 +127,7 @@ describe('POST /proxy', () => {
     it('returns 400 when `request` is missing', async () => {
       const res = await request(app).post('/proxy').send({ lang: 'pt' });
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('bad_request');
+      expect(res.body.error.code).toBe('bad_request');
     });
 
     it('returns 400 when `request.url` is missing', async () => {
@@ -148,6 +149,19 @@ describe('POST /proxy', () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it('returns 400 when forbidden upstream header is provided', async () => {
+      const res = await request(app).post('/proxy').send({
+        lang: 'pt',
+        request: {
+          url: 'https://exercise-api.ymove.app/api/v2/exercises',
+          method: 'GET',
+          headers: { 'X-API-Key': 'user-supplied' },
+        },
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('bad_request');
+    });
   });
 
   describe('Error mapping', () => {
@@ -158,7 +172,7 @@ describe('POST /proxy', () => {
 
       const res = await request(app).post('/proxy').send(VALID_BODY);
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('bad_request');
+      expect(res.body.error.code).toBe('bad_request');
     });
 
     it('returns 502 on YMoveError', async () => {
@@ -166,7 +180,7 @@ describe('POST /proxy', () => {
 
       const res = await request(app).post('/proxy').send(VALID_BODY);
       expect(res.status).toBe(502);
-      expect(res.body.error).toBe('Upstream API failure');
+      expect(res.body.error.code).toBe('upstream_error');
     });
 
     it('returns 500 on unexpected error', async () => {
@@ -174,7 +188,7 @@ describe('POST /proxy', () => {
 
       const res = await request(app).post('/proxy').send(VALID_BODY);
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('internal_error');
+      expect(res.body.error.code).toBe('internal_error');
       expect(JSON.stringify(res.body)).not.toContain('Something went wrong');
     });
   });
@@ -185,6 +199,15 @@ describe('POST /proxy', () => {
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('ok');
       expect(res.body.service).toBe('exercise-microservice');
+    });
+  });
+
+  describe('Metrics endpoint', () => {
+    it('returns Prometheus-compatible plaintext', async () => {
+      const res = await request(app).get('/metrics');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/plain');
+      expect(res.text).toContain('requests_total');
     });
   });
 

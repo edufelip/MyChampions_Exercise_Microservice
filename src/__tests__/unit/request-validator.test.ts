@@ -46,7 +46,7 @@ describe('validateProxyBody', () => {
       request: {
         url: 'https://exercise-api.ymove.app/api/v2/exercises?search=Press',
         method: 'GET',
-        headers: { 'X-API-Key': 'test' },
+        headers: { Accept: 'application/json' },
       },
     });
 
@@ -132,5 +132,47 @@ describe('validateProxyBody', () => {
     validateProxyBody(req, res as Response, next);
     expect(next).not.toHaveBeenCalled();
     expect(getStatusCode()).toBe(400);
+  });
+
+  it('returns 400 when forbidden header is provided', () => {
+    const { req, res, next, getStatusCode } = makeReqRes({
+      request: {
+        url: 'https://exercise-api.ymove.app/api/v2/exercises',
+        method: 'GET',
+        headers: { 'X-API-Key': 'bad' },
+      },
+    });
+    validateProxyBody(req, res as Response, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(getStatusCode()).toBe(400);
+  });
+
+  it('returns 400 when lang is not a string', () => {
+    const { req, res, next, getStatusCode } = makeReqRes({
+      lang: 123,
+      request: {
+        url: 'https://exercise-api.ymove.app/api/v2/exercises',
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      },
+    });
+    validateProxyBody(req, res as Response, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(getStatusCode()).toBe(400);
+  });
+
+  it('normalizes allowed header name to lowercase', () => {
+    const { req, res, next } = makeReqRes({
+      request: {
+        url: 'https://exercise-api.ymove.app/api/v2/exercises',
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      },
+    });
+    validateProxyBody(req, res as Response, next);
+    expect(next).toHaveBeenCalled();
+    expect((req.body as { request: { headers: Record<string, string> } }).request.headers).toEqual({
+      accept: 'application/json',
+    });
   });
 });

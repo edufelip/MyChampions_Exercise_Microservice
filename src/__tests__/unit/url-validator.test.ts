@@ -35,6 +35,24 @@ describe('validateUpstreamUrl', () => {
     const url = 'https://exercise-api.ymove.app/api/v2/exercises/123';
     expect(() => validateUpstreamUrl(url)).not.toThrow();
   });
+
+  it('rejects non-https URLs', () => {
+    expect(() =>
+      validateUpstreamUrl('http://exercise-api.ymove.app/api/v2/exercises'),
+    ).toThrow(UrlValidationError);
+  });
+
+  it('rejects non-default ports', () => {
+    expect(() =>
+      validateUpstreamUrl('https://exercise-api.ymove.app:8443/api/v2/exercises'),
+    ).toThrow(UrlValidationError);
+  });
+
+  it('rejects URLs with embedded credentials', () => {
+    expect(() =>
+      validateUpstreamUrl('https://user:pass@exercise-api.ymove.app/api/v2/exercises'),
+    ).toThrow(UrlValidationError);
+  });
 });
 
 describe('extractSearchParam', () => {

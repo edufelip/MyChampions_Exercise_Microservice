@@ -12,13 +12,9 @@ const LANG_ALIASES: Record<string, string> = {
   spa: 'es',
   fra: 'fr',
   ita: 'it',
-  deu: 'de',
-  zho: 'zh',
-  jpn: 'ja',
-  kor: 'ko',
-  rus: 'ru',
-  ara: 'ar',
 };
+
+const SUPPORTED_LANGUAGES = new Set(['en', 'pt', 'es', 'fr', 'it']);
 
 /**
  * Normalize a language code to its BCP-47 base tag.
@@ -48,8 +44,8 @@ export function normalizeLanguage(lang: string | undefined | null): string {
     return LANG_ALIASES[base];
   }
 
-  // Must be 2 or 3 lowercase alpha chars to be valid
-  if (/^[a-z]{2,3}$/.test(base)) {
+  // Keep only explicitly supported languages
+  if (SUPPORTED_LANGUAGES.has(base)) {
     return base;
   }
 

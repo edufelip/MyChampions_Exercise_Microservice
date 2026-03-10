@@ -19,6 +19,7 @@ export interface TranslationStats {
   cacheHits: number;
   cacheMisses: number;
   translationCalls: number;
+  translatedCharacters: number;
 }
 
 /**
@@ -34,8 +35,14 @@ export interface TranslationStats {
 export async function translateExercises(
   exercises: ExerciseDTO[],
   lang: string,
+  requestId?: string,
 ): Promise<{ exercises: TranslatedExerciseDTO[]; stats: TranslationStats }> {
-  const stats: TranslationStats = { cacheHits: 0, cacheMisses: 0, translationCalls: 0 };
+  const stats: TranslationStats = {
+    cacheHits: 0,
+    cacheMisses: 0,
+    translationCalls: 0,
+    translatedCharacters: 0,
+  };
 
   if (lang === 'en' || exercises.length === 0) {
     const result = exercises.map((ex) => ({
@@ -94,7 +101,8 @@ export async function translateExercises(
     let translatedBatch: string[];
 
     try {
-      translatedBatch = await translateTexts(batchTexts, lang);
+      translatedBatch = await translateTexts(batchTexts, lang, requestId);
+      stats.translatedCharacters += batchTexts.reduce((acc, text) => acc + text.length, 0);
     } catch (err) {
       logger.warn({ err: String(err) }, 'Translation API failed – falling back to English');
       translatedBatch = batchTexts; // fallback to original English

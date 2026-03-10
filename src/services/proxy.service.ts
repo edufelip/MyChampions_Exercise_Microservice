@@ -10,12 +10,19 @@
  *  6. Return translated response + observability metrics.
  */
 import { randomUUID } from 'crypto';
+import { config } from '../config';
 import { RequestDTO, TranslatedExerciseListResponse, RequestMetrics } from '../domain/dtos';
 import { normalizeLanguage } from './lang-normalizer';
-import { validateUpstreamUrl, extractSearchParam, replaceSearchParam } from './url-validator';
+import {
+  validateUpstreamUrl,
+  extractSearchParam,
+  replaceSearchParam,
+  UrlValidationError,
+} from './url-validator';
 import { translateQueryToEnglish, translateExercises } from './translation.service';
 import { forwardToYMove, YMoveError } from '../infrastructure/ymove-client';
 import { logger } from '../logger';
+import { incCounter } from '../observability/metrics';
 
 export { YMoveError };
 export { UrlValidationError } from './url-validator';
@@ -43,11 +50,19 @@ export async function executeProxy(dto: RequestDTO): Promise<ProxyResult> {
 
   // Step 3 – Extract and translate search query
   const searchTermOriginal = extractSearchParam(parsedUrl);
+
+  if (searchTermOriginal.length > 0 && searchTermOriginal.length > config.maxSearchLength) {
+    throw new UrlValidationError(
+      `search parameter exceeds maximum length of ${config.maxSearchLength} characters`,
+    );
+  }
+
   let searchTermTranslated = searchTermOriginal;
 
   try {
     if (searchTermOriginal) {
-      searchTermTranslated = await translateQueryToEnglish(searchTermOriginal, lang);
+      searchTermTranslated = await translateQueryToEnglish(searchTermOriginal, lang, requestId);
+      incCounter('translation_requests_total', { lang, result: 'query' });
     }
   } catch (err) {
     logger.warn({ requestId, err: String(err) }, 'Query translation failed – using original term');
@@ -62,13 +77,15 @@ export async function executeProxy(dto: RequestDTO): Promise<ProxyResult> {
   const ymoveResponse = await forwardToYMove(
     forwardUrl,
     dto.request.method,
-    dto.request.headers,
+    requestId,
   );
+  incCounter('upstream_requests_total', { status: 'success' });
 
   // Step 5 – Translate response exercises
   const { exercises: translatedExercises, stats } = await translateExercises(
     ymoveResponse.exercises,
     lang,
+    requestId,
   );
 
   const durationMs = Date.now() - startMs;
@@ -81,8 +98,16 @@ export async function executeProxy(dto: RequestDTO): Promise<ProxyResult> {
     cacheHits: stats.cacheHits,
     cacheMisses: stats.cacheMisses,
     translationCalls: stats.translationCalls,
+    translatedCharacters: stats.translatedCharacters,
     durationMs,
   };
+
+  incCounter('requests_total', { lang, status: 'success' });
+  incCounter('cache_hits_total', { lang }, stats.cacheHits);
+  incCounter('cache_misses_total', { lang }, stats.cacheMisses);
+  if (stats.translationCalls > 0) {
+    incCounter('translation_requests_total', { lang, result: 'exercise' }, stats.translationCalls);
+  }
 
   logger.info(metrics, 'Proxy request completed');
 

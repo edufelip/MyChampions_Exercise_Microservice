@@ -92,5 +92,6 @@ export interface RequestMetrics {
   cacheHits: number;
   cacheMisses: number;
   translationCalls: number;
+  translatedCharacters: number;
   durationMs: number;
 }

@@ -13,7 +13,7 @@ import { config } from '../config';
 import { logger } from '../logger';
 
 function cacheKey(exerciseId: string, lang: string): string {
-  return `exercise:${exerciseId}:${lang}`;
+  return `exercise:${exerciseId}:${lang}:v1`;
 }
 
 /**

@@ -40,8 +40,8 @@ describe('normalizeLanguage', () => {
     expect(normalizeLanguage('pt-br')).toBe('pt');
   });
 
-  it('strips underscore subtag: "zh_TW" → "zh"', () => {
-    expect(normalizeLanguage('zh_TW')).toBe('zh');
+  it('strips underscore subtag and falls back when unsupported', () => {
+    expect(normalizeLanguage('zh_TW')).toBe('en');
   });
 
   it('normalizes "es" to "es"', () => {
@@ -64,9 +64,9 @@ describe('normalizeLanguage', () => {
     expect(normalizeLanguage('english')).toBe('en');
   });
 
-  it('passes through known 2-letter codes as-is', () => {
-    expect(normalizeLanguage('de')).toBe('de');
-    expect(normalizeLanguage('ja')).toBe('ja');
-    expect(normalizeLanguage('ko')).toBe('ko');
+  it('falls back to en for unsupported 2-letter codes', () => {
+    expect(normalizeLanguage('de')).toBe('en');
+    expect(normalizeLanguage('ja')).toBe('en');
+    expect(normalizeLanguage('ko')).toBe('en');
   });
 });

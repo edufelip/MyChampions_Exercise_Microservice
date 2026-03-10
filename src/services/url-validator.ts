@@ -19,12 +19,22 @@ export class UrlValidationError extends Error {
  * @throws UrlValidationError if the URL is invalid or not allowed.
  */
 export function validateUpstreamUrl(rawUrl: string): URL {
+  if (rawUrl.length > config.maxForwardUrlLength) {
+    throw new UrlValidationError(
+      `URL length exceeds maximum of ${config.maxForwardUrlLength} characters.`,
+    );
+  }
+
   let parsed: URL;
 
   try {
     parsed = new URL(rawUrl);
   } catch {
     throw new UrlValidationError(`Invalid URL: "${rawUrl}"`);
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new UrlValidationError('Only HTTPS URLs are allowed.');
   }
 
   if (parsed.hostname !== config.allowedUpstreamHost) {
@@ -37,6 +47,14 @@ export function validateUpstreamUrl(rawUrl: string): URL {
     throw new UrlValidationError(
       `Forbidden path "${parsed.pathname}". Only paths under "${config.allowedUpstreamPath}" are allowed.`,
     );
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new UrlValidationError('User info in URL is not allowed.');
+  }
+
+  if (parsed.port !== '' && parsed.port !== '443') {
+    throw new UrlValidationError('Only default HTTPS port is allowed.');
   }
 
   return parsed;

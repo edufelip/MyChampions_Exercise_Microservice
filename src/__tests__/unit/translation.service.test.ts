@@ -104,6 +104,7 @@ describe('translateExercises', () => {
     expect(stats.cacheHits).toBe(0);
     expect(stats.cacheMisses).toBe(1);
     expect(stats.translationCalls).toBe(1);
+    expect(stats.translatedCharacters).toBeGreaterThan(0);
   });
 
   it('falls back to English when translation API fails', async () => {

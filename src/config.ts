@@ -59,6 +59,15 @@ export const config = {
   /** HTTP request timeout in milliseconds for upstream calls */
   upstreamTimeoutMs: parseIntegerEnv('UPSTREAM_TIMEOUT_MS', '10000', { min: 100 }),
 
+  /** HTTP request timeout in milliseconds for translation API calls */
+  translationTimeoutMs: parseIntegerEnv('TRANSLATION_TIMEOUT_MS', '10000', { min: 100 }),
+
+  /** Max retries for YMove upstream call on retryable failures */
+  upstreamMaxRetries: parseIntegerEnv('UPSTREAM_MAX_RETRIES', '1', { min: 0, max: 5 }),
+
+  /** Max retries for translation API call on retryable failures */
+  translationMaxRetries: parseIntegerEnv('TRANSLATION_MAX_RETRIES', '1', { min: 0, max: 5 }),
+
   /** Rate limiting window in milliseconds */
   rateLimitWindowMs: parseIntegerEnv('RATE_LIMIT_WINDOW_MS', '60000', { min: 1000 }),
 
@@ -76,6 +85,12 @@ export const config = {
 
   /** Allowed upstream path prefix for URL validation */
   allowedUpstreamPath: '/api/v2/exercises',
+
+  /** Maximum forwarded URL length */
+  maxForwardUrlLength: parseIntegerEnv('MAX_FORWARD_URL_LENGTH', '2048', { min: 64, max: 8192 }),
+
+  /** Maximum accepted search query length */
+  maxSearchLength: parseIntegerEnv('MAX_SEARCH_LENGTH', '200', { min: 1, max: 2000 }),
 
   /** Google Translate API base URL */
   googleTranslateApiUrl: optionalEnv(

@@ -140,3 +140,30 @@ Services:
 npm run lint
 npm test
 ```
+
+## CI/CD Production Deploy
+
+On push to `main`, workflow `.github/workflows/deploy-exercise-prod.yml` will:
+
+- build and push production image to GHCR
+- connect to VPS over SSH
+- sync deploy files to `/opt/exercise-microservice`
+- replace VPS `.env` from GitHub secret
+- pull the new image and restart with Docker Compose
+- verify `https://exerciseservice.eduwaldo.com/health`
+
+Required GitHub repository secrets:
+
+- `VPS_HOST`
+- `VPS_USER`
+- `VPS_SSH_PRIVATE_KEY`
+- `VPS_KNOWN_HOSTS`
+- `GHCR_USERNAME`
+- `GHCR_TOKEN`
+- `EXERCISESERVICE_ENV_FILE`
+
+`EXERCISESERVICE_ENV_FILE` must include at least:
+
+- `YMOVE_API_KEY=...`
+- `GOOGLE_TRANSLATE_API_KEY=...`
+- `REDIS_URL=...`

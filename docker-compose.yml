@@ -2,6 +2,7 @@ version: '3.9'
 
 services:
   api:
+    image: ${IMAGE_REPO:-ghcr.io/edufelip/mychampions_exercise_microservice}:${IMAGE_TAG:-main}
     build:
       context: .
       dockerfile: Dockerfile
@@ -35,8 +36,6 @@ services:
     image: redis:7-alpine
     container_name: exercise-microservice-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data

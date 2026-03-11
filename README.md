@@ -21,6 +21,15 @@ It accepts a target language and an upstream exercise search URL, translates the
 
 `POST /proxy`
 
+### Catalog Endpoints
+
+- `POST /catalog/search` – multilingual catalog search with prefix + typo-tolerant matching
+- `GET /catalog/health` – catalog readiness and sync freshness
+- `POST /catalog/review` – update localization status (`reviewed` / `rejected`) and optional localized text fields
+  - Requires header: `x-catalog-review-key: <CATALOG_REVIEW_API_KEY>`
+- `POST /catalog/benchmark` – benchmark catalog vs upstream relevance/latency for provided queries
+  - Requires header: `x-catalog-review-key: <CATALOG_REVIEW_API_KEY>`
+
 ### Request Body
 
 ```json
@@ -86,6 +95,10 @@ It accepts a target language and an upstream exercise search URL, translates the
   - `cache_hits_total`
   - `cache_misses_total`
   - `upstream_requests_total`
+  - `catalog_search_requests_total`
+  - `catalog_sync_runs_total`
+  - `catalog_shadow_checks_total`
+  - `catalog_benchmark_runs_total`
 
 ## Environment Variables
 
@@ -109,6 +122,18 @@ Common configuration:
 - `RATE_LIMIT_MAX` (default `100`)
 - `MAX_FORWARD_URL_LENGTH` (default `2048`)
 - `MAX_SEARCH_LENGTH` (default `200`)
+- `CATALOG_ENABLED` (default `true`)
+- `CATALOG_SYNC_INTERVAL_MS` (default `15552000000` = ~6 months)
+- `CATALOG_SYNC_PAGE_SIZE` (default `100`)
+- `CATALOG_SYNC_MAX_PAGES` (default `100`)
+- `CATALOG_MIN_QUERY_LENGTH` (default `1`)
+- `CATALOG_TYPO_DISTANCE` (default `1`)
+- `CATALOG_REVIEW_API_KEY` (required to enable `/catalog/review`)
+- `CATALOG_VERSION_RETENTION` (default `2`)
+- `CATALOG_SYNC_ON_STARTUP` (default `true`)
+- `CATALOG_SYNC_BACKGROUND_INTERVAL_MS` (default `900000`)
+- `CATALOG_SHADOW_VALIDATION_ENABLED` (default `false`)
+- `CATALOG_SHADOW_SAMPLE_RATE` (default `0.1`)
 
 ## Local Run
 

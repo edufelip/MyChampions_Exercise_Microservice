@@ -12,6 +12,18 @@ import { logger } from './logger';
 import { validateProxyBody } from './middleware/request-validator';
 import { proxyController } from './controllers/proxy.controller';
 import { renderPrometheusMetrics } from './observability/metrics';
+import {
+  catalogBenchmarkController,
+  catalogHealthController,
+  reviewCatalogController,
+  searchCatalogController,
+} from './controllers/catalog.controller';
+import {
+  validateCatalogBenchmarkBody,
+  validateCatalogReviewAuth,
+  validateCatalogReviewBody,
+  validateCatalogSearchBody,
+} from './middleware/catalog-request-validator';
 
 export function createApp(): express.Application {
   const app = express();
@@ -72,6 +84,10 @@ export function createApp(): express.Application {
    * forwards to YMove, translates the response, and returns it to the client.
    */
   app.post('/proxy', validateProxyBody, proxyController);
+  app.post('/catalog/search', validateCatalogSearchBody, searchCatalogController);
+  app.post('/catalog/review', validateCatalogReviewAuth, validateCatalogReviewBody, reviewCatalogController);
+  app.post('/catalog/benchmark', validateCatalogReviewAuth, validateCatalogBenchmarkBody, catalogBenchmarkController);
+  app.get('/catalog/health', catalogHealthController);
 
   app.get('/metrics', (_req: Request, res: Response) => {
     res.setHeader('content-type', 'text/plain; version=0.0.4; charset=utf-8');

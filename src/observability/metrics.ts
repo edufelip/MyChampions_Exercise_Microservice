@@ -3,7 +3,11 @@ type CounterName =
   | 'translation_requests_total'
   | 'cache_hits_total'
   | 'cache_misses_total'
-  | 'upstream_requests_total';
+  | 'upstream_requests_total'
+  | 'catalog_search_requests_total'
+  | 'catalog_sync_runs_total'
+  | 'catalog_shadow_checks_total'
+  | 'catalog_benchmark_runs_total';
 
 interface Labels {
   lang?: string;
@@ -36,6 +40,10 @@ export function renderPrometheusMetrics(): string {
     '# TYPE cache_hits_total counter',
     '# TYPE cache_misses_total counter',
     '# TYPE upstream_requests_total counter',
+    '# TYPE catalog_search_requests_total counter',
+    '# TYPE catalog_sync_runs_total counter',
+    '# TYPE catalog_shadow_checks_total counter',
+    '# TYPE catalog_benchmark_runs_total counter',
   ];
 
   for (const [metricKey, value] of counters.entries()) {

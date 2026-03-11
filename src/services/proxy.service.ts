@@ -23,6 +23,7 @@ import { translateQueryToEnglish, translateExercises } from './translation.servi
 import { forwardToYMove, YMoveError } from '../infrastructure/ymove-client';
 import { logger } from '../logger';
 import { incCounter } from '../observability/metrics';
+import { runCatalogShadowComparison } from './catalog-shadow.service';
 
 export { YMoveError };
 export { UrlValidationError } from './url-validator';
@@ -80,6 +81,14 @@ export async function executeProxy(dto: RequestDTO): Promise<ProxyResult> {
     requestId,
   );
   incCounter('upstream_requests_total', { status: 'success' });
+
+  // Optional shadow path for comparing catalog relevance without affecting the API response.
+  void runCatalogShadowComparison(
+    lang,
+    searchTermOriginal,
+    ymoveResponse.exercises,
+    requestId,
+  );
 
   // Step 5 – Translate response exercises
   const { exercises: translatedExercises, stats } = await translateExercises(

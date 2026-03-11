@@ -95,3 +95,112 @@ export interface RequestMetrics {
   translatedCharacters: number;
   durationMs: number;
 }
+
+/** Catalog search request body */
+export interface CatalogSearchRequestDTO {
+  lang?: string;
+  query?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Localization quality state for a language */
+export type LocalizationStatus = 'machine' | 'reviewed' | 'rejected';
+
+/** Localized text block for one exercise and language */
+export interface LocalizedExerciseFieldsDTO {
+  title: string;
+  description: string;
+  instructions: string[];
+  importantPoints: string[];
+  status: LocalizationStatus;
+  updatedAt: string;
+}
+
+/** Catalog document persisted in Redis */
+export interface CatalogExerciseDocumentDTO {
+  id: string;
+  slug: string;
+  muscleGroup: string | null;
+  secondaryMuscles: string | null;
+  equipment: string | null;
+  category: string | null;
+  difficulty: string | null;
+  hasVideo: boolean;
+  hasVideoWhite: boolean;
+  hasVideoGym: boolean;
+  videoDurationSecs: number | null;
+  exerciseType: string[];
+  videoUrl: string | null;
+  videoHlsUrl: string | null;
+  thumbnailUrl: string | null;
+  videos: VideoDTO[] | null;
+  localizations: Record<string, LocalizedExerciseFieldsDTO>;
+}
+
+/** Single search result returned from catalog endpoint */
+export interface CatalogExerciseDTO {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  instructions: string[];
+  importantPoints: string[];
+  muscleGroup: string | null;
+  secondaryMuscles: string | null;
+  equipment: string | null;
+  category: string | null;
+  difficulty: string | null;
+  hasVideo: boolean;
+  hasVideoWhite: boolean;
+  hasVideoGym: boolean;
+  videoDurationSecs: number | null;
+  exerciseType: string[];
+  videoUrl: string | null;
+  videoHlsUrl: string | null;
+  thumbnailUrl: string | null;
+  videos: VideoDTO[] | null;
+  localizationStatus: LocalizationStatus;
+}
+
+/** Catalog search response payload */
+export interface CatalogSearchResponseDTO {
+  page: number;
+  pageSize: number;
+  total: number;
+  results: CatalogExerciseDTO[];
+  meta: {
+    lang: string;
+    normalizedQuery: string;
+    tookMs: number;
+    catalogSyncedAt: string | null;
+  };
+}
+
+export interface CatalogBenchmarkRequestDTO {
+  lang?: string;
+  queries: string[];
+  pageSize?: number;
+}
+
+export interface CatalogBenchmarkQueryResultDTO {
+  query: string;
+  upstreamLatencyMs: number;
+  catalogLatencyMs: number;
+  upstreamResultCount: number;
+  catalogResultCount: number;
+  topOverlapCount: number;
+  topOverlapRate: number;
+}
+
+export interface CatalogBenchmarkResponseDTO {
+  lang: string;
+  pageSize: number;
+  totalQueries: number;
+  summary: {
+    avgUpstreamLatencyMs: number;
+    avgCatalogLatencyMs: number;
+    avgTopOverlapRate: number;
+  };
+  results: CatalogBenchmarkQueryResultDTO[];
+}

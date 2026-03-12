@@ -1,6 +1,7 @@
 import { CatalogError, ensureCatalogSynced } from '../../services/catalog.service';
 import * as repo from '../../infrastructure/catalog-repository';
 import * as ymoveClient from '../../infrastructure/ymove-client';
+import * as translateClient from '../../infrastructure/translate-client';
 
 jest.mock('../../infrastructure/catalog-repository', () => ({
   addTokenPrefixToDictionary: jest.fn(),
@@ -35,9 +36,14 @@ jest.mock('../../infrastructure/ymove-client', () => ({
   forwardToYMove: jest.fn(),
 }));
 
+jest.mock('../../infrastructure/translate-client', () => ({
+  translateTexts: jest.fn(async (texts: string[]) => texts),
+}));
+
 describe('ensureCatalogSynced fail-open behavior', () => {
   const mockedRepo = repo as jest.Mocked<typeof repo>;
   const mockedYMove = ymoveClient as jest.Mocked<typeof ymoveClient>;
+  const mockedTranslate = translateClient as jest.Mocked<typeof translateClient>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -54,6 +60,7 @@ describe('ensureCatalogSynced fail-open behavior', () => {
     mockedRepo.addTokenPrefixToDictionary.mockResolvedValue();
     mockedRepo.upsertExactIndex.mockResolvedValue();
     mockedRepo.upsertIndexPrefix.mockResolvedValue();
+    mockedTranslate.translateTexts.mockImplementation(async (texts: string[]) => texts);
   });
 
   it('does not throw when sync fails but active catalog data already exists', async () => {
@@ -64,7 +71,7 @@ describe('ensureCatalogSynced fail-open behavior', () => {
     });
     mockedYMove.forwardToYMove.mockRejectedValue(new Error('upstream down'));
 
-    await expect(ensureCatalogSynced('req-1')).resolves.toBeUndefined();
+    await expect(ensureCatalogSynced('req-1')).resolves.toBe('stale_served');
   });
 
   it('throws when sync fails and there is no existing active catalog dataset', async () => {
@@ -130,10 +137,63 @@ describe('ensureCatalogSynced fail-open behavior', () => {
       ],
     });
 
-    await expect(ensureCatalogSynced('req-3')).resolves.toBeUndefined();
+    await expect(ensureCatalogSynced('req-3')).resolves.toBe('synced');
     expect(mockedRepo.saveCatalogDocument).toHaveBeenCalledTimes(1);
     expect(mockedRepo.setCatalogMetadata).toHaveBeenCalledWith(
       expect.objectContaining({ exerciseCount: 1 }),
+      'v2',
+    );
+  });
+
+  it('continues with other seeds when one seed query fails', async () => {
+    mockedRepo.getActiveCatalogVersion.mockResolvedValue(null);
+    mockedRepo.getCatalogMetadata.mockResolvedValue(null);
+
+    let callCount = 0;
+    mockedYMove.forwardToYMove.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        throw new Error('first seed failed');
+      }
+
+      return {
+        page: 1,
+        pageSize: 1,
+        total: 1,
+        exercises: [
+          {
+            id: 'same-id',
+            title: 'Bench Press',
+            slug: 'bench-press',
+            description: 'desc',
+            instructions: ['step'],
+            importantPoints: ['point'],
+            muscleGroup: 'chest',
+            secondaryMuscles: null,
+            equipment: 'barbell',
+            category: 'strength',
+            difficulty: 'intermediate',
+            videoDurationSecs: null,
+            hasVideo: true,
+            hasVideoWhite: false,
+            hasVideoGym: true,
+            exerciseType: ['strength'],
+            videoUrl: null,
+            videoHlsUrl: null,
+            thumbnailUrl: null,
+            videos: null,
+          },
+        ],
+      };
+    });
+
+    await expect(ensureCatalogSynced('req-4')).resolves.toBe('synced');
+
+    expect(mockedRepo.setCatalogMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exerciseCount: 1,
+        failedSeedQueries: 1,
+      }),
       'v2',
     );
   });

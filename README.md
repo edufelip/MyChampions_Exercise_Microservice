@@ -79,6 +79,7 @@ It accepts a target language and an upstream exercise search URL, translates the
 
 - Query term (`search`) is translated to English before forwarding.
 - Human-readable response fields are translated and cached.
+- Catalog sync uses a curated top-exercise seed list (grouped by muscle group), can fetch multiple pages per seed, deduplicates by exercise ID, and stores localized entries for `en`, `pt`, `es`, `fr`, and `it`.
 - Redis cache key format: `exercise:{exerciseId}:{lang}:v1`
 - Default TTL: 30 days (`CACHE_TTL_SECONDS=2592000`)
 - If translation API fails, original English text is returned.
@@ -125,13 +126,15 @@ Common configuration:
 - `CATALOG_ENABLED` (default `true`)
 - `CATALOG_SYNC_INTERVAL_MS` (default `15552000000` = ~6 months)
 - `CATALOG_SYNC_PAGE_SIZE` (default `100`)
-- `CATALOG_SYNC_MAX_PAGES` (default `100`)
+- `CATALOG_SEED_QUERY_LIMIT` (default `80`)
+- `CATALOG_SEED_MAX_PAGES` (default `1`)
 - `CATALOG_MIN_QUERY_LENGTH` (default `1`)
 - `CATALOG_TYPO_DISTANCE` (default `1`)
 - `CATALOG_REVIEW_API_KEY` (required to enable `/catalog/review`)
 - `CATALOG_VERSION_RETENTION` (default `2`)
 - `CATALOG_SYNC_ON_STARTUP` (default `true`)
 - `CATALOG_SYNC_BACKGROUND_INTERVAL_MS` (default `900000`)
+- `CATALOG_STARTUP_SYNC_COOLDOWN_MS` (default `15552000000` = ~6 months)
 - `CATALOG_SHADOW_VALIDATION_ENABLED` (default `false`)
 - `CATALOG_SHADOW_SAMPLE_RATE` (default `0.1`)
 
@@ -158,6 +161,8 @@ Services:
 
 - `api`
 - `redis`
+
+Redis is configured with AOF persistence, `maxmemory 512mb`, and `noeviction` policy to keep catalog records stable as an internal dataset while avoiding host OOM risk.
 
 ## Test and Lint
 

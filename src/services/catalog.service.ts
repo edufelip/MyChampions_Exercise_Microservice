@@ -40,6 +40,7 @@ import { translateTexts } from '../infrastructure/translate-client';
 import { logger } from '../logger';
 import { incCounter } from '../observability/metrics';
 import { normalizeLanguage } from './lang-normalizer';
+import { getTopExerciseSeedNames } from '../data/top-exercise-seeds';
 import {
   buildTokenPrefixes,
   levenshteinDistance,
@@ -54,6 +55,7 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 const CANDIDATE_POOL_SIZE = 200;
+const MAX_CONSECUTIVE_SEED_FAILURES_BEFORE_ABORT = 5;
 
 const BASE_SYNONYMS: Record<string, Record<string, string[]>> = {
   en: {
@@ -87,7 +89,9 @@ const BASE_SYNONYMS: Record<string, Record<string, string[]>> = {
   },
 };
 
-let activeSyncPromise: Promise<void> | null = null;
+export type CatalogSyncOutcome = 'fresh' | 'synced' | 'stale_served';
+
+let activeSyncPromise: Promise<CatalogSyncOutcome> | null = null;
 
 function versionRank(version: string): number {
   const match = /^v(\d+)$/.exec(version);
@@ -172,8 +176,12 @@ function sanitizePageSize(value: number | undefined): number {
   return Math.min(MAX_PAGE_SIZE, Math.floor(value));
 }
 
-function buildYMoveUrl(page: number, pageSize: number): string {
-  return `https://${config.allowedUpstreamHost}${config.allowedUpstreamPath}?page=${page}&pageSize=${pageSize}`;
+function buildYMoveSeedSearchUrl(seedName: string, page: number, pageSize: number): string {
+  const url = new URL(`https://${config.allowedUpstreamHost}${config.allowedUpstreamPath}`);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('pageSize', String(pageSize));
+  url.searchParams.set('search', seedName);
+  return url.toString();
 }
 
 function extractLocalizationFromExercise(
@@ -374,7 +382,7 @@ async function getPopularCatalogPage(lang: string, page: number, pageSize: numbe
   return getCatalogDocumentIds(page, pageSize, version);
 }
 
-export async function ensureCatalogSynced(requestId: string): Promise<void> {
+export async function ensureCatalogSynced(requestId: string): Promise<CatalogSyncOutcome> {
   if (!config.catalogEnabled) {
     throw new CatalogError('Catalog feature is disabled', 503, 'catalog_disabled');
   }
@@ -390,115 +398,157 @@ export async function ensureCatalogSynced(requestId: string): Promise<void> {
   );
 
   if (isFresh) {
-    return;
+    return 'fresh';
   }
 
-  if (activeSyncPromise) {
-    await activeSyncPromise;
-    return;
-  }
+  if (!activeSyncPromise) {
+    activeSyncPromise = (async (): Promise<CatalogSyncOutcome> => {
+      const syncStartedAt = Date.now();
+      logger.info({ requestId }, 'Catalog sync started');
+      const newVersion = await createCatalogVersion();
 
-  activeSyncPromise = (async () => {
-    const syncStartedAt = Date.now();
-    logger.info({ requestId }, 'Catalog sync started');
-    const newVersion = await createCatalogVersion();
+      try {
+        await registerBaseSynonyms(newVersion);
 
-    try {
-      await registerBaseSynonyms(newVersion);
+        let totalFetched = 0;
+        let fetchedRows = 0;
+        let duplicateRows = 0;
+        let successfulSeedQueries = 0;
+        let failedSeedQueries = 0;
+        let consecutiveFailedSeedQueries = 0;
+        const seenExerciseIds = new Set<string>();
+        const seedNames = getTopExerciseSeedNames(config.catalogSeedQueryLimit);
 
-      let page = 1;
-      let totalFetched = 0;
-      let duplicateRows = 0;
-      let expectedTotal = Number.POSITIVE_INFINITY;
-      const seenExerciseIds = new Set<string>();
+        for (const seedName of seedNames) {
+          let seedHadSuccessfulFetch = false;
 
-      while (
-        page <= config.catalogSyncMaxPages
-        && totalFetched < expectedTotal
-      ) {
-        const url = buildYMoveUrl(page, config.catalogSyncPageSize);
-        const upstream = await forwardToYMove(url, 'GET', requestId);
+          for (let page = 1; page <= config.catalogSeedMaxPages; page++) {
+            const url = buildYMoveSeedSearchUrl(seedName, page, config.catalogSyncPageSize);
+            let upstream;
 
-        if (page === 1) {
-          expectedTotal = upstream.total || 0;
-        }
+            try {
+              upstream = await forwardToYMove(url, 'GET', requestId);
+              seedHadSuccessfulFetch = true;
+            } catch (err) {
+              failedSeedQueries += 1;
+              consecutiveFailedSeedQueries += 1;
+              logger.warn(
+                { requestId, seedName, page, err: String(err) },
+                'Catalog seed query failed; continuing with remaining seeds',
+              );
+              break;
+            }
 
-        if (upstream.exercises.length === 0) {
-          break;
-        }
+            fetchedRows += upstream.exercises.length;
+            if (upstream.exercises.length === 0) {
+              break;
+            }
 
-        for (const exercise of upstream.exercises) {
-          if (seenExerciseIds.has(exercise.id)) {
-            duplicateRows += 1;
-            continue;
+            let uniqueRowsInPage = 0;
+            for (const exercise of upstream.exercises) {
+              if (seenExerciseIds.has(exercise.id)) {
+                duplicateRows += 1;
+                continue;
+              }
+
+              seenExerciseIds.add(exercise.id);
+              uniqueRowsInPage += 1;
+
+              const localizations: Record<string, LocalizedExerciseFieldsDTO> = {
+                en: extractLocalizationFromExercise(exercise, 'reviewed'),
+              };
+
+              for (const lang of NON_ENGLISH_LANGUAGES) {
+                localizations[lang] = await localizeExercise(exercise, lang, requestId);
+                await setLocalizationStatus(exercise.id, lang, localizations[lang].status, newVersion);
+              }
+
+              const doc: CatalogExerciseDocumentDTO = {
+                id: exercise.id,
+                slug: exercise.slug,
+                muscleGroup: exercise.muscleGroup,
+                secondaryMuscles: exercise.secondaryMuscles,
+                equipment: exercise.equipment,
+                category: exercise.category,
+                difficulty: exercise.difficulty,
+                hasVideo: exercise.hasVideo,
+                hasVideoWhite: exercise.hasVideoWhite,
+                hasVideoGym: exercise.hasVideoGym,
+                videoDurationSecs: exercise.videoDurationSecs,
+                exerciseType: exercise.exerciseType,
+                videoUrl: exercise.videoUrl,
+                videoHlsUrl: exercise.videoHlsUrl,
+                thumbnailUrl: exercise.thumbnailUrl,
+                videos: exercise.videos,
+                localizations,
+              };
+
+              await saveCatalogDocument(doc, newVersion);
+              await indexExercise(doc, newVersion);
+            }
+
+            totalFetched = seenExerciseIds.size;
+
+            if (upstream.exercises.length < config.catalogSyncPageSize || uniqueRowsInPage === 0) {
+              break;
+            }
           }
 
-          seenExerciseIds.add(exercise.id);
-
-          const localizations: Record<string, LocalizedExerciseFieldsDTO> = {
-            en: extractLocalizationFromExercise(exercise, 'reviewed'),
-          };
-
-          for (const lang of NON_ENGLISH_LANGUAGES) {
-            localizations[lang] = await localizeExercise(exercise, lang, requestId);
-            await setLocalizationStatus(exercise.id, lang, localizations[lang].status, newVersion);
+          if (seedHadSuccessfulFetch) {
+            successfulSeedQueries += 1;
+            consecutiveFailedSeedQueries = 0;
           }
 
-          const doc: CatalogExerciseDocumentDTO = {
-            id: exercise.id,
-            slug: exercise.slug,
-            muscleGroup: exercise.muscleGroup,
-            secondaryMuscles: exercise.secondaryMuscles,
-            equipment: exercise.equipment,
-            category: exercise.category,
-            difficulty: exercise.difficulty,
-            hasVideo: exercise.hasVideo,
-            hasVideoWhite: exercise.hasVideoWhite,
-            hasVideoGym: exercise.hasVideoGym,
-            videoDurationSecs: exercise.videoDurationSecs,
-            exerciseType: exercise.exerciseType,
-            videoUrl: exercise.videoUrl,
-            videoHlsUrl: exercise.videoHlsUrl,
-            thumbnailUrl: exercise.thumbnailUrl,
-            videos: exercise.videos,
-            localizations,
-          };
-
-          await saveCatalogDocument(doc, newVersion);
-          await indexExercise(doc, newVersion);
+          if (
+            successfulSeedQueries === 0
+            && consecutiveFailedSeedQueries >= MAX_CONSECUTIVE_SEED_FAILURES_BEFORE_ABORT
+          ) {
+            throw new Error('Catalog sync aborted due to repeated upstream seed failures');
+          }
         }
 
-        totalFetched = seenExerciseIds.size;
-        page += 1;
-      }
+        if (totalFetched === 0) {
+          throw new Error('Catalog sync produced zero exercises');
+        }
 
-      const metadata = {
-        lastSyncedAt: new Date().toISOString(),
-        exerciseCount: totalFetched,
-      };
-
-      await setCatalogMetadata(metadata, newVersion);
-      await setActiveCatalogVersion(newVersion);
-      await cleanupOldCatalogVersions(newVersion);
-      incCounter('catalog_sync_runs_total', { status: 'success' });
-
-      logger.info(
-        {
-          requestId,
+        const metadata = {
+          lastSyncedAt: new Date().toISOString(),
           exerciseCount: totalFetched,
+          seedQueryCount: seedNames.length,
+          successfulSeedQueries,
+          failedSeedQueries,
+          fetchedRows,
           duplicateRows,
-          durationMs: Date.now() - syncStartedAt,
-        },
-        'Catalog sync finished',
-      );
-    } catch (err) {
-      await clearCatalog(newVersion);
-      throw err;
-    }
-  })();
+        };
+
+        await setCatalogMetadata(metadata, newVersion);
+        await setActiveCatalogVersion(newVersion);
+        await cleanupOldCatalogVersions(newVersion);
+        incCounter('catalog_sync_runs_total', { status: failedSeedQueries > 0 ? 'partial_success' : 'success' });
+
+        logger.info(
+          {
+            requestId,
+            exerciseCount: totalFetched,
+            fetchedRows,
+            seedQueryCount: seedNames.length,
+            successfulSeedQueries,
+            failedSeedQueries,
+            duplicateRows,
+            durationMs: Date.now() - syncStartedAt,
+          },
+          'Catalog sync finished',
+        );
+        return 'synced';
+      } catch (err) {
+        await clearCatalog(newVersion);
+        throw err;
+      }
+    })();
+  }
 
   try {
-    await activeSyncPromise;
+    return await activeSyncPromise;
   } catch (err) {
     if (hasUsableActiveData) {
       incCounter('catalog_sync_runs_total', { status: 'stale_served' });
@@ -506,7 +556,7 @@ export async function ensureCatalogSynced(requestId: string): Promise<void> {
         { requestId, err: String(err), activeVersion: activeVersionAtStart },
         'Catalog sync failed; serving previously active catalog version',
       );
-      return;
+      return 'stale_served';
     }
 
     incCounter('catalog_sync_runs_total', { status: 'failure' });

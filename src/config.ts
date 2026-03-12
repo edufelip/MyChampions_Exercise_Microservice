@@ -137,8 +137,11 @@ export const config = {
   /** Page size used while ingesting YMove exercises */
   catalogSyncPageSize: parseIntegerEnv('CATALOG_SYNC_PAGE_SIZE', '100', { min: 1, max: 500 }),
 
-  /** Maximum pages fetched in one sync run */
-  catalogSyncMaxPages: parseIntegerEnv('CATALOG_SYNC_MAX_PAGES', '100', { min: 1, max: 5000 }),
+  /** Number of curated seed exercise names to use during sync */
+  catalogSeedQueryLimit: parseIntegerEnv('CATALOG_SEED_QUERY_LIMIT', '80', { min: 1, max: 500 }),
+
+  /** Max pages fetched per curated seed query during sync */
+  catalogSeedMaxPages: parseIntegerEnv('CATALOG_SEED_MAX_PAGES', '1', { min: 1, max: 20 }),
 
   /** Minimum query length before prefix/typo search */
   catalogMinQueryLength: parseIntegerEnv('CATALOG_MIN_QUERY_LENGTH', '1', { min: 0, max: 64 }),
@@ -157,6 +160,11 @@ export const config = {
 
   /** Background interval to re-check catalog freshness */
   catalogSyncBackgroundIntervalMs: parseIntegerEnv('CATALOG_SYNC_BACKGROUND_INTERVAL_MS', '900000', {
+    min: 60000,
+  }),
+
+  /** Cooldown window for startup-triggered sync attempts */
+  catalogStartupSyncCooldownMs: parseIntegerEnv('CATALOG_STARTUP_SYNC_COOLDOWN_MS', '15552000000', {
     min: 60000,
   }),
 

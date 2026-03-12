@@ -3,11 +3,18 @@ import { getRedisClient } from './redis-client';
 
 const DEFAULT_CATALOG_VERSION = 'v1';
 const ACTIVE_CATALOG_VERSION_KEY = 'catalog:active_version';
+const STARTUP_SYNC_COOLDOWN_AT_KEY = 'catalog:startup_sync:cooldown_at';
+const STARTUP_SYNC_FLIGHT_LOCK_KEY = 'catalog:startup_sync:flight_lock';
 const SUPPORTED_CATALOG_LANGS = ['en', 'pt', 'es', 'fr', 'it'] as const;
 
 export interface CatalogMetadata {
   lastSyncedAt: string;
   exerciseCount: number;
+  seedQueryCount?: number;
+  successfulSeedQueries?: number;
+  failedSeedQueries?: number;
+  fetchedRows?: number;
+  duplicateRows?: number;
 }
 
 function exerciseDocKey(exerciseId: string, version: string): string {
@@ -74,6 +81,41 @@ export async function createCatalogVersion(): Promise<string> {
   const redis = getRedisClient();
   const seq = await redis.incr('catalog:version_seq');
   return `v${seq}`;
+}
+
+export async function getStartupSyncCooldownAt(): Promise<number | null> {
+  const redis = getRedisClient();
+  const raw = await redis.get(STARTUP_SYNC_COOLDOWN_AT_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export async function setStartupSyncCooldownAt(timestampMs: number, cooldownMs: number): Promise<void> {
+  const redis = getRedisClient();
+  await redis.set(STARTUP_SYNC_COOLDOWN_AT_KEY, String(timestampMs), 'PX', cooldownMs);
+}
+
+export async function acquireStartupSyncFlightLock(ownerToken: string, ttlMs: number): Promise<boolean> {
+  const redis = getRedisClient();
+  const result = await redis.set(STARTUP_SYNC_FLIGHT_LOCK_KEY, ownerToken, 'PX', ttlMs, 'NX');
+
+  return result === 'OK';
+}
+
+export async function releaseStartupSyncFlightLock(ownerToken: string): Promise<void> {
+  const redis = getRedisClient();
+  const script = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`;
+
+  await redis.eval(script, 1, STARTUP_SYNC_FLIGHT_LOCK_KEY, ownerToken);
 }
 
 function extractVersionFromMetadataKey(key: string): string | null {

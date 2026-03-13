@@ -9,8 +9,7 @@ import rateLimit from 'express-rate-limit';
 import { randomUUID } from 'crypto';
 import { config } from './config';
 import { logger } from './logger';
-import { validateProxyBody } from './middleware/request-validator';
-import { proxyController } from './controllers/proxy.controller';
+import { proxyDeprecatedController } from './controllers/proxy.controller';
 import { renderPrometheusMetrics } from './observability/metrics';
 import {
   catalogBenchmarkController,
@@ -78,12 +77,7 @@ export function createApp(): express.Application {
     });
   });
 
-  /**
-   * POST /proxy
-   * Accepts a language and a YMove API request, translates the search query,
-   * forwards to YMove, translates the response, and returns it to the client.
-   */
-  app.post('/proxy', validateProxyBody, proxyController);
+  app.post('/proxy', proxyDeprecatedController);
   app.post('/catalog/search', validateCatalogSearchBody, searchCatalogController);
   app.post('/catalog/review', validateCatalogReviewAuth, validateCatalogReviewBody, reviewCatalogController);
   app.post('/catalog/benchmark', validateCatalogReviewAuth, validateCatalogBenchmarkBody, catalogBenchmarkController);

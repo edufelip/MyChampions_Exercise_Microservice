@@ -1,4 +1,4 @@
-import { CatalogError, ensureCatalogSynced } from '../../services/catalog.service';
+import { CatalogError, ensureCatalogSynced, getCatalogHealth } from '../../services/catalog.service';
 import * as repo from '../../infrastructure/catalog-repository';
 import * as ymoveClient from '../../infrastructure/ymove-client';
 import * as translateClient from '../../infrastructure/translate-client';
@@ -196,5 +196,61 @@ describe('ensureCatalogSynced fail-open behavior', () => {
       }),
       'v2',
     );
+  });
+
+  it('does not treat zero-count metadata as fresh and forces a resync attempt', async () => {
+    mockedRepo.getActiveCatalogVersion.mockResolvedValue('v1');
+    mockedRepo.getCatalogMetadata.mockResolvedValue({
+      lastSyncedAt: new Date().toISOString(),
+      exerciseCount: 0,
+    });
+    mockedYMove.forwardToYMove.mockResolvedValue({
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      exercises: [
+        {
+          id: 'one',
+          title: 'Back Squat',
+          slug: 'back-squat',
+          description: 'desc',
+          instructions: ['step'],
+          importantPoints: ['point'],
+          muscleGroup: 'legs',
+          secondaryMuscles: null,
+          equipment: 'barbell',
+          category: 'strength',
+          difficulty: 'intermediate',
+          videoDurationSecs: null,
+          hasVideo: true,
+          hasVideoWhite: false,
+          hasVideoGym: true,
+          exerciseType: ['strength'],
+          videoUrl: null,
+          videoHlsUrl: null,
+          thumbnailUrl: null,
+          videos: null,
+        },
+      ],
+    });
+
+    await expect(ensureCatalogSynced('req-5')).resolves.toBe('synced');
+    expect(mockedRepo.createCatalogVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports catalog as not ready when metadata exists but exercise count is zero', async () => {
+    const syncedAt = new Date().toISOString();
+    mockedRepo.getActiveCatalogVersion.mockResolvedValue('v1');
+    mockedRepo.getCatalogMetadata.mockResolvedValue({
+      lastSyncedAt: syncedAt,
+      exerciseCount: 0,
+    });
+
+    await expect(getCatalogHealth('req-6')).resolves.toEqual({
+      ready: false,
+      syncedAt,
+      exerciseCount: 0,
+      stale: true,
+    });
   });
 });

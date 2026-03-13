@@ -20,10 +20,13 @@ export class YMoveError extends Error {
 }
 
 interface RawYMoveResponse {
-  page?: number;
-  pageSize?: number;
-  total?: number;
-  exercises?: ExerciseDTO[];
+  data?: ExerciseDTO[];
+  pagination?: {
+    page?: number;
+    pageSize?: number;
+    total?: number;
+    totalPages?: number;
+  };
 }
 
 /**
@@ -71,12 +74,19 @@ export async function forwardToYMove(
       }
 
       const data = response.data;
+      const exercises = data?.data;
+      const pagination = data?.pagination;
+
+      if (!Array.isArray(exercises) || !pagination || typeof pagination !== 'object') {
+        logger.error({ requestId, url, responseSample: data }, 'Unexpected YMove response schema');
+        throw new YMoveError('Unexpected response schema from YMove API', 502);
+      }
 
       return {
-        page: data.page ?? 1,
-        pageSize: data.pageSize ?? 0,
-        total: data.total ?? 0,
-        exercises: data.exercises ?? [],
+        page: pagination.page ?? 1,
+        pageSize: pagination.pageSize ?? exercises.length,
+        total: pagination.total ?? exercises.length,
+        exercises,
       };
     } catch (err) {
       if (err instanceof YMoveError) {

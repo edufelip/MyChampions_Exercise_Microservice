@@ -390,7 +390,11 @@ export async function ensureCatalogSynced(requestId: string): Promise<CatalogSyn
   const activeVersionAtStart = await getActiveCatalogVersion();
   const meta = await getCatalogMetadata(activeVersionAtStart ?? undefined);
   const now = Date.now();
-  const isFresh = meta && now - Date.parse(meta.lastSyncedAt) < config.catalogSyncIntervalMs;
+  const isFresh = Boolean(
+    meta
+    && meta.exerciseCount > 0
+    && now - Date.parse(meta.lastSyncedAt) < config.catalogSyncIntervalMs,
+  );
   const hasUsableActiveData = Boolean(
     activeVersionAtStart
     && meta
@@ -668,11 +672,11 @@ export async function getCatalogHealth(requestId: string): Promise<CatalogHealth
   const version = activeVersion ?? 'v1';
   const metadata = await getCatalogMetadata(version);
 
-  if (!metadata) {
+  if (!metadata || metadata.exerciseCount <= 0) {
     return {
       ready: false,
-      syncedAt: null,
-      exerciseCount: 0,
+      syncedAt: metadata?.lastSyncedAt ?? null,
+      exerciseCount: metadata?.exerciseCount ?? 0,
       stale: true,
     };
   }

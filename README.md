@@ -1,25 +1,21 @@
-# YMove Translation Proxy Microservice
+# Multilingual Exercise Catalog Microservice
 
-Production-oriented translation-aware proxy for the YMove Exercise API.
+Production-oriented multilingual exercise catalog service backed by YMove ingestion.
 
-It accepts a target language and an upstream exercise search URL, translates the search term to English, forwards the request to YMove, translates human-readable fields in the response to the requested language, and caches per-exercise translations in Redis.
+It syncs top exercise seeds from YMove, machine-translates localized fields, stores them in Redis, and serves low-latency multilingual search directly from the internal catalog.
 
 ## Highlights
 
 - Clean-layered architecture (`controller -> service -> infrastructure`)
-- Strict upstream URL validation to prevent open-proxy abuse
+- Controlled upstream ingestion from YMove (server-side only)
 - Language normalization with supported language allowlist
 - Google Translate integration with retry/backoff and graceful fallback
-- Redis translation cache with versioned keys and TTL
+- Redis-backed versioned catalog dataset
 - Structured logs with request IDs and redaction
 - Basic Prometheus-compatible metrics endpoint
 - Unit and integration tests
 
 ## API Contract
-
-### Endpoint
-
-`POST /proxy`
 
 ### Catalog Endpoints
 
@@ -30,30 +26,22 @@ It accepts a target language and an upstream exercise search URL, translates the
 - `POST /catalog/benchmark` – benchmark catalog vs upstream relevance/latency for provided queries
   - Requires header: `x-catalog-review-key: <CATALOG_REVIEW_API_KEY>`
 
-### Request Body
+### `POST /catalog/search` Request Body
 
 ```json
 {
   "lang": "pt",
-  "request": {
-    "url": "https://exercise-api.ymove.app/api/v2/exercises?pageSize=20&search=Supino",
-    "method": "GET",
-    "headers": {
-      "Accept": "application/json"
-    }
-  }
+  "query": "Agachamento",
+  "page": 1,
+  "pageSize": 20
 }
 ```
 
-### Important Security Rules
+### Search API Notes
 
-- Only `GET` is accepted.
-- Only host `exercise-api.ymove.app` is accepted.
-- Only paths under `/api/v2/exercises` are accepted.
-- Only `https` URLs are accepted.
-- Only default HTTPS port is accepted.
-- Client-provided upstream API key headers are rejected.
-- Upstream YMove API key is always injected from `YMOVE_API_KEY` on the server side.
+- `POST /proxy` is deprecated and now returns HTTP `410 Gone`.
+- Search is served from the internal Redis-backed multilingual catalog.
+- Query normalization is accent-insensitive and typo-tolerant based on `CATALOG_TYPO_DISTANCE`.
 
 ### Language Behavior
 
@@ -77,13 +65,10 @@ It accepts a target language and an upstream exercise search URL, translates the
 
 ## Translation + Cache Rules
 
-- Query term (`search`) is translated to English before forwarding.
-- Human-readable response fields are translated and cached.
+- Sync ingestion translates upstream English exercise content into supported languages.
+- Human-readable response fields are translated and stored in catalog localizations.
 - Catalog sync uses a curated top-exercise seed list (grouped by muscle group), can fetch multiple pages per seed, deduplicates by exercise ID, and stores localized entries for `en`, `pt`, `es`, `fr`, and `it`.
-- Redis cache key format: `exercise:{exerciseId}:{lang}:v1`
-- Default TTL: 30 days (`CACHE_TTL_SECONDS=2592000`)
-- If translation API fails, original English text is returned.
-- If Redis is unavailable, request still succeeds without cache.
+- If translation API fails during sync, the English source is kept for that localization.
 
 ## Observability
 

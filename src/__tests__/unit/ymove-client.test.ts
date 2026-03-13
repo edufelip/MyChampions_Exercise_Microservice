@@ -35,10 +35,13 @@ describe('forwardToYMove', () => {
       .get('/api/v2/exercises')
       .query({ search: 'Press' })
       .reply(200, {
-        page: 1,
-        pageSize: 20,
-        total: 1,
-        exercises: [{ id: '1', title: 'Bench Press' }],
+        data: [{ id: '1', title: 'Bench Press' }],
+        pagination: {
+          page: 1,
+          pageSize: 20,
+          total: 1,
+          totalPages: 1,
+        },
       });
 
     const result = await forwardToYMove(
@@ -78,10 +81,13 @@ describe('forwardToYMove', () => {
       .get('/api/v2/exercises')
       .query({ search: 'Press' })
       .reply(200, {
-        page: 1,
-        pageSize: 20,
-        total: 0,
-        exercises: [],
+        data: [],
+        pagination: {
+          page: 1,
+          pageSize: 20,
+          total: 0,
+          totalPages: 0,
+        },
       });
 
     await forwardToYMove(
@@ -91,5 +97,26 @@ describe('forwardToYMove', () => {
     );
 
     expect(scope.isDone()).toBe(true);
+  });
+
+  it('throws when upstream returns unexpected response schema', async () => {
+    nock('https://exercise-api.ymove.app')
+      .get('/api/v2/exercises')
+      .query({ search: 'Press' })
+      .reply(200, {
+        page: 1,
+        exercises: [],
+      });
+
+    await expect(
+      forwardToYMove(
+        'https://exercise-api.ymove.app/api/v2/exercises?search=Press',
+        'GET',
+        'req-4',
+      ),
+    ).rejects.toMatchObject<Partial<YMoveError>>({
+      name: 'YMoveError',
+      statusCode: 502,
+    });
   });
 });

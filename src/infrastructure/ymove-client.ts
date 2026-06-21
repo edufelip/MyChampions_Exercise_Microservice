@@ -20,7 +20,7 @@ export class YMoveError extends Error {
 }
 
 interface RawYMoveResponse {
-  data?: ExerciseDTO[];
+  data?: ExerciseDTO[] | ExerciseDTO;
   pagination?: {
     page?: number;
     pageSize?: number;
@@ -76,6 +76,15 @@ export async function forwardToYMove(
       const data = response.data;
       const exercises = data?.data;
       const pagination = data?.pagination;
+
+      if (!Array.isArray(exercises) && exercises && typeof exercises === 'object') {
+        return {
+          page: 1,
+          pageSize: 1,
+          total: 1,
+          exercises: [exercises],
+        };
+      }
 
       if (!Array.isArray(exercises) || !pagination || typeof pagination !== 'object') {
         logger.error({ requestId, url, responseSample: data }, 'Unexpected YMove response schema');

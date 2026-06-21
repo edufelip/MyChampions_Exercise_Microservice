@@ -6,6 +6,8 @@ const ACTIVE_CATALOG_VERSION_KEY = 'catalog:active_version';
 const STARTUP_SYNC_COOLDOWN_AT_KEY = 'catalog:startup_sync:cooldown_at';
 const STARTUP_SYNC_FLIGHT_LOCK_KEY = 'catalog:startup_sync:flight_lock';
 const SUPPORTED_CATALOG_LANGS = ['en', 'pt', 'es', 'fr', 'it'] as const;
+const TOKEN_MIN_LENGTH = 2;
+const PREFIX_MAX_LENGTH = 32;
 
 export interface CatalogMetadata {
   lastSyncedAt: string;
@@ -41,6 +43,10 @@ function popularityKey(lang: string, version: string): string {
   return `catalog:popularity:${lang}:${version}`;
 }
 
+function exerciseIndexedTokensKey(lang: string, exerciseId: string, version: string): string {
+  return `catalog:indexed_tokens:${lang}:${exerciseId}:${version}`;
+}
+
 function synonymsKey(lang: string, token: string, version: string): string {
   return `catalog:syn:${lang}:${token}:${version}`;
 }
@@ -51,6 +57,10 @@ function metadataKey(version: string): string {
 
 function docsSetKey(version: string): string {
   return `catalog:docids:${version}`;
+}
+
+function docsOrderKey(version: string): string {
+  return `catalog:docorder:${version}`;
 }
 
 function statusKey(exerciseId: string, lang: string, version: string): string {
@@ -149,8 +159,11 @@ export async function listCatalogVersions(): Promise<string[]> {
 export async function saveCatalogDocument(doc: CatalogExerciseDocumentDTO, version?: string): Promise<void> {
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
-  await redis.set(exerciseDocKey(doc.id, keyVersion), JSON.stringify(doc));
-  await redis.sadd(docsSetKey(keyVersion), doc.id);
+  const multi = redis.multi();
+  multi.set(exerciseDocKey(doc.id, keyVersion), JSON.stringify(doc));
+  multi.sadd(docsSetKey(keyVersion), doc.id);
+  multi.zadd(docsOrderKey(keyVersion), 'NX', String(Date.now()), doc.id);
+  await multi.exec();
 }
 
 export async function getCatalogDocument(exerciseId: string, version?: string): Promise<CatalogExerciseDocumentDTO | null> {
@@ -188,6 +201,14 @@ export async function getCatalogDocumentIds(
   const keyVersion = await resolveVersion(version);
   const start = Math.max(0, (page - 1) * pageSize);
   const end = start + Math.max(0, pageSize - 1);
+
+  const orderKey = docsOrderKey(keyVersion);
+  const orderedCount = await redis.zcard(orderKey);
+  if (orderedCount > 0) {
+    const orderedIds = await redis.zrange(orderKey, start, end);
+    return orderedIds;
+  }
+
   const allIds = await redis.smembers(docsSetKey(keyVersion));
   return allIds.sort().slice(start, end + 1);
 }
@@ -214,45 +235,88 @@ export async function clearPopularity(version?: string): Promise<void> {
   }
 }
 
-export async function upsertIndexPrefix(
+export async function getExerciseIndexedTokens(
   lang: string,
-  prefix: string,
   exerciseId: string,
-  score: number,
   version?: string,
-): Promise<void> {
+): Promise<string[]> {
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
-  await redis.zadd(indexKey(lang, prefix, keyVersion), String(score), exerciseId);
+  return redis.smembers(exerciseIndexedTokensKey(lang, exerciseId, keyVersion));
 }
 
-export async function upsertExactIndex(
+export async function setExerciseIndexedTokens(
   lang: string,
-  token: string,
   exerciseId: string,
-  score: number,
+  tokens: string[],
   version?: string,
 ): Promise<void> {
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
-  await redis.zadd(exactIndexKey(lang, token, keyVersion), String(score), exerciseId);
+  const key = exerciseIndexedTokensKey(lang, exerciseId, keyVersion);
+
+  const multi = redis.multi();
+  multi.del(key);
+  if (tokens.length > 0) {
+    multi.sadd(key, ...tokens);
+  }
+  await multi.exec();
 }
 
-export async function addTokenToDictionary(lang: string, token: string, version?: string): Promise<void> {
-  const redis = getRedisClient();
-  const keyVersion = await resolveVersion(version);
-  await redis.sadd(tokenDictionaryKey(lang, keyVersion), token);
-}
-
-export async function addTokenPrefixToDictionary(
+export async function removeExerciseTokenIndexes(
   lang: string,
-  prefix: string,
-  token: string,
+  exerciseId: string,
+  tokens: string[],
   version?: string,
 ): Promise<void> {
+  if (tokens.length === 0) {
+    return;
+  }
+
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
-  await redis.sadd(tokenPrefixDictionaryKey(lang, prefix, keyVersion), token);
+  const multi = redis.multi();
+
+  for (const token of tokens) {
+    multi.zrem(exactIndexKey(lang, token, keyVersion), exerciseId);
+
+    const cappedLength = Math.min(token.length, PREFIX_MAX_LENGTH);
+    for (let i = TOKEN_MIN_LENGTH; i <= cappedLength; i++) {
+      multi.zrem(indexKey(lang, token.slice(0, i), keyVersion), exerciseId);
+    }
+  }
+
+  await multi.exec();
+}
+
+export async function upsertExerciseTokenIndexes(
+  lang: string,
+  exerciseId: string,
+  tokens: string[],
+  version?: string,
+): Promise<void> {
+  if (tokens.length === 0) {
+    return;
+  }
+
+  const redis = getRedisClient();
+  const keyVersion = await resolveVersion(version);
+  const multi = redis.multi();
+
+  for (const token of tokens) {
+    multi.sadd(tokenDictionaryKey(lang, keyVersion), token);
+    if (token.length >= TOKEN_MIN_LENGTH) {
+      multi.sadd(tokenPrefixDictionaryKey(lang, token.slice(0, TOKEN_MIN_LENGTH), keyVersion), token);
+    }
+    multi.zadd(exactIndexKey(lang, token, keyVersion), '100', exerciseId);
+
+    const cappedLength = Math.min(token.length, PREFIX_MAX_LENGTH);
+    for (let i = TOKEN_MIN_LENGTH; i <= cappedLength; i++) {
+      multi.zadd(indexKey(lang, token.slice(0, i), keyVersion), '60', exerciseId);
+    }
+  }
+
+  await multi.exec();
 }
 
 export async function getIdsByPrefix(
@@ -306,10 +370,25 @@ export async function getSynonymTargets(lang: string, token: string, version?: s
   return redis.smembers(synonymsKey(lang, token, keyVersion));
 }
 
-export async function incrementPopularity(lang: string, exerciseId: string, by = 1, version?: string): Promise<void> {
+export async function incrementPopularityMany(
+  lang: string,
+  exerciseIds: string[],
+  by = 1,
+  version?: string,
+): Promise<void> {
+  if (exerciseIds.length === 0) {
+    return;
+  }
+
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
-  await redis.zincrby(popularityKey(lang, keyVersion), by, exerciseId);
+  const multi = redis.multi();
+
+  for (const exerciseId of exerciseIds) {
+    multi.zincrby(popularityKey(lang, keyVersion), by, exerciseId);
+  }
+
+  await multi.exec();
 }
 
 export async function getPopularityScores(
@@ -385,7 +464,7 @@ export async function getLocalizationStatus(
   const redis = getRedisClient();
   const keyVersion = await resolveVersion(version);
   const raw = await redis.get(statusKey(exerciseId, lang, keyVersion));
-  if (raw === 'machine' || raw === 'reviewed' || raw === 'rejected') {
+  if (raw === 'source' || raw === 'machine' || raw === 'fallback' || raw === 'reviewed' || raw === 'rejected') {
     return raw;
   }
   return null;

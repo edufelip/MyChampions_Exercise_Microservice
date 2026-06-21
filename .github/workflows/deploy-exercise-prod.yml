@@ -12,7 +12,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE_REPO: ghcr.io/edufelip/mychampions_exercise_microservice
@@ -21,6 +20,9 @@ jobs:
   build_and_push:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
     steps:

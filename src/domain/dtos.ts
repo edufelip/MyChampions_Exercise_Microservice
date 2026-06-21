@@ -1,26 +1,8 @@
 /**
- * Domain DTOs and models for the YMove Translation Proxy.
+ * Domain DTOs and models for the multilingual exercise catalog.
  *
  * These types define the data contracts between the layers of the application.
  */
-
-/** Incoming request from client */
-export interface RequestDTO {
-  /** Target language code (e.g. "pt", "es", "fr") */
-  lang: string;
-  /** The upstream request to forward */
-  request: ProxyRequestDTO;
-}
-
-/** The upstream request details to forward */
-export interface ProxyRequestDTO {
-  /** Full URL to forward (must be on exercise-api.ymove.app) */
-  url: string;
-  /** HTTP method to use */
-  method: string;
-  /** HTTP headers to forward (e.g. X-API-Key) */
-  headers: Record<string, string>;
-}
 
 /** A single exercise as returned by the YMove API */
 export interface ExerciseDTO {
@@ -56,44 +38,12 @@ export interface VideoDTO {
   isPrimary: boolean;
 }
 
-/** The translated human-readable fields of an exercise (stored in Redis) */
-export interface TranslatedFieldsDTO {
-  title: string;
-  description: string;
-  instructions: string[];
-  importantPoints: string[];
-}
-
-/** An exercise with translated text fields */
-export type TranslatedExerciseDTO = ExerciseDTO & TranslatedFieldsDTO;
-
 /** Response from the YMove API exercises list endpoint */
 export interface YMoveExerciseListResponse {
   page: number;
   pageSize: number;
   total: number;
   exercises: ExerciseDTO[];
-}
-
-/** The translated response returned to the client */
-export interface TranslatedExerciseListResponse {
-  page: number;
-  pageSize: number;
-  total: number;
-  exercises: TranslatedExerciseDTO[];
-}
-
-/** Observability metadata for a single proxy request */
-export interface RequestMetrics {
-  requestId: string;
-  userLang: string;
-  searchTermOriginal: string;
-  searchTermTranslated: string;
-  cacheHits: number;
-  cacheMisses: number;
-  translationCalls: number;
-  translatedCharacters: number;
-  durationMs: number;
 }
 
 /** Catalog search request body */
@@ -104,8 +54,14 @@ export interface CatalogSearchRequestDTO {
   pageSize?: number;
 }
 
+/** Catalog exercise detail request params/query */
+export interface CatalogExerciseDetailRequestDTO {
+  id: string;
+  lang?: string;
+}
+
 /** Localization quality state for a language */
-export type LocalizationStatus = 'machine' | 'reviewed' | 'rejected';
+export type LocalizationStatus = 'source' | 'machine' | 'fallback' | 'reviewed' | 'rejected';
 
 /** Localized text block for one exercise and language */
 export interface LocalizedExerciseFieldsDTO {

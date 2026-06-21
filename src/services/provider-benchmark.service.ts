@@ -10,7 +10,7 @@ import { logger } from '../logger';
 import { incCounter } from '../observability/metrics';
 import { normalizeLanguage } from './lang-normalizer';
 import { searchCatalog } from './catalog.service';
-import { translateQueryToEnglish } from './translation.service';
+import { translateQueryToEnglish } from '../infrastructure/translate-client';
 
 const MAX_BENCHMARK_QUERIES = 50;
 const DEFAULT_PAGE_SIZE = 10;

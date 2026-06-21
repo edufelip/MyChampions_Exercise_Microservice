@@ -64,6 +64,9 @@ jobs:
     timeout-minutes: 20
     needs: build_and_push
     environment: production
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_TAG: ${{ needs.build_and_push.outputs.image_tag }}
     steps:
@@ -132,8 +135,8 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ssh "$VPS_USER@$VPS_HOST" "

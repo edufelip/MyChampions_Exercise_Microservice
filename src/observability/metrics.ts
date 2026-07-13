@@ -1,9 +1,4 @@
 type CounterName =
-  | 'requests_total'
-  | 'translation_requests_total'
-  | 'cache_hits_total'
-  | 'cache_misses_total'
-  | 'upstream_requests_total'
   | 'catalog_search_requests_total'
   | 'catalog_sync_runs_total'
   | 'catalog_shadow_checks_total'
@@ -35,11 +30,6 @@ export function incCounter(name: CounterName, labels?: Labels, by = 1): void {
 
 export function renderPrometheusMetrics(): string {
   const lines = [
-    '# TYPE requests_total counter',
-    '# TYPE translation_requests_total counter',
-    '# TYPE cache_hits_total counter',
-    '# TYPE cache_misses_total counter',
-    '# TYPE upstream_requests_total counter',
     '# TYPE catalog_search_requests_total counter',
     '# TYPE catalog_sync_runs_total counter',
     '# TYPE catalog_shadow_checks_total counter',

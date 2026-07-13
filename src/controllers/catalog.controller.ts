@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { CatalogBenchmarkRequestDTO } from '../domain/dtos';
 import {
   CatalogError,
+  getCatalogExerciseById,
   getCatalogHealth,
   reviewCatalogLocalization,
   ReviewInput,
@@ -60,6 +61,31 @@ export async function catalogHealthController(_req: Request, res: Response): Pro
     res.status(200).json(health);
   } catch (err) {
     logger.error({ requestId, err: String(err) }, 'Unexpected error on catalog health');
+    res.status(500).json(errorBody(requestId, 500, 'internal_error', 'An unexpected error occurred'));
+  }
+}
+
+export async function catalogExerciseDetailController(req: Request, res: Response): Promise<void> {
+  const requestId = getRequestId(res);
+  const exerciseId = req.params.id ?? '';
+  const lang = typeof req.query.lang === 'string' ? req.query.lang : undefined;
+
+  try {
+    const exercise = await getCatalogExerciseById(exerciseId, lang, requestId);
+    if (!exercise) {
+      res.status(404).json(errorBody(requestId, 404, 'not_found', 'Exercise not found'));
+      return;
+    }
+
+    res.status(200).json(exercise);
+  } catch (err) {
+    if (err instanceof CatalogError) {
+      logger.warn({ requestId, err: err.message, code: err.code }, 'Catalog exercise detail failed');
+      res.status(err.statusCode).json(errorBody(requestId, err.statusCode, err.code, err.message));
+      return;
+    }
+
+    logger.error({ requestId, err: String(err) }, 'Unexpected error on catalog exercise detail');
     res.status(500).json(errorBody(requestId, 500, 'internal_error', 'An unexpected error occurred'));
   }
 }

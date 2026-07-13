@@ -99,6 +99,48 @@ describe('forwardToYMove', () => {
     expect(scope.isDone()).toBe(true);
   });
 
+  it('parses a single exercise detail response', async () => {
+    nock('https://exercise-api.ymove.app')
+      .get('/api/v2/exercises/squat-1')
+      .reply(200, {
+        data: {
+          id: 'squat-1',
+          title: 'Back Squat',
+          slug: 'back-squat',
+          description: 'desc',
+          instructions: ['step'],
+          importantPoints: ['point'],
+          muscleGroup: 'quads',
+          secondaryMuscles: null,
+          equipment: 'barbell',
+          category: 'strength',
+          difficulty: 'intermediate',
+          videoDurationSecs: null,
+          hasVideo: true,
+          hasVideoWhite: false,
+          hasVideoGym: true,
+          exerciseType: ['strength'],
+          videoUrl: null,
+          videoHlsUrl: null,
+          thumbnailUrl: null,
+          videos: null,
+        },
+      });
+
+    await expect(
+      forwardToYMove(
+        'https://exercise-api.ymove.app/api/v2/exercises/squat-1',
+        'GET',
+        'req-detail',
+      ),
+    ).resolves.toMatchObject({
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      exercises: [{ id: 'squat-1', title: 'Back Squat' }],
+    });
+  });
+
   it('throws when upstream returns unexpected response schema', async () => {
     nock('https://exercise-api.ymove.app')
       .get('/api/v2/exercises')

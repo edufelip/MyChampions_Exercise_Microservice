@@ -25,6 +25,14 @@ function optionalNullableEnv(name: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function optionalBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (typeof raw === 'undefined') {
+    return fallback;
+  }
+  return raw.trim().toLowerCase() !== 'false';
+}
+
 function parseIntegerEnv(
   name: string,
   fallback: string,
@@ -83,6 +91,12 @@ export const config = {
   /** Redis connection URL */
   redisUrl: optionalEnv('REDIS_URL', 'redis://localhost:6379'),
 
+  /** Postgres catalog source used to restore Redis cache on cache miss */
+  postgresUrl: optionalNullableEnv('POSTGRES_URL'),
+
+  /** Restore Redis catalog from Postgres when Redis has no usable catalog */
+  catalogPostgresRestoreOnMiss: optionalBooleanEnv('CATALOG_POSTGRES_RESTORE_ON_MISS', true),
+
   /** Cache TTL in seconds for translated exercises (default: 30 days) */
   cacheTtlSeconds: parseIntegerEnv('CACHE_TTL_SECONDS', '2592000', { min: 1 }),
 
@@ -103,6 +117,12 @@ export const config = {
 
   /** Max requests per IP per window */
   rateLimitMax: parseIntegerEnv('RATE_LIMIT_MAX', '100', { min: 1 }),
+
+  /** Store rate-limit counters in Redis instead of process memory */
+  rateLimitRedisEnabled: optionalBooleanEnv(
+    'RATE_LIMIT_REDIS_ENABLED',
+    optionalEnv('NODE_ENV', 'production') !== 'test',
+  ),
 
   /** Number of trusted proxy hops for correct client IP extraction behind Nginx */
   trustProxyHops: parseIntegerEnv('TRUST_PROXY_HOPS', '1', { min: 0 }),
@@ -147,7 +167,7 @@ export const config = {
   catalogMinQueryLength: parseIntegerEnv('CATALOG_MIN_QUERY_LENGTH', '1', { min: 0, max: 64 }),
 
   /** Maximum edit distance used for typo tolerant matching */
-  catalogTypoDistance: parseIntegerEnv('CATALOG_TYPO_DISTANCE', '1', { min: 0, max: 2 }),
+  catalogTypoDistance: parseIntegerEnv('CATALOG_TYPO_DISTANCE', '2', { min: 0, max: 2 }),
 
   /** Optional shared secret required for /catalog/review */
   catalogReviewApiKey: optionalNullableEnv('CATALOG_REVIEW_API_KEY'),

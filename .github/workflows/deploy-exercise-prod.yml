@@ -12,7 +12,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE_REPO: ghcr.io/edufelip/mychampions_exercise_microservice
@@ -21,6 +20,9 @@ jobs:
   build_and_push:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
     steps:
@@ -62,6 +64,9 @@ jobs:
     timeout-minutes: 20
     needs: build_and_push
     environment: production
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_TAG: ${{ needs.build_and_push.outputs.image_tag }}
     steps:
@@ -121,6 +126,17 @@ jobs:
             for k in YMOVE_API_KEY GOOGLE_TRANSLATE_API_KEY REDIS_URL; do
               grep -Eq "^${k}=.+" .env.new || { echo "ERROR: missing or empty ${k} in EXERCISESERVICE_ENV_FILE"; rm -f .env.new; exit 1; }
             done
+            POSTGRES_ENV_FILE=/root/mychampions-catalog-postgres-sync.env
+            [[ -f "$POSTGRES_ENV_FILE" ]] || { echo "ERROR: missing ${POSTGRES_ENV_FILE}"; rm -f .env.new; exit 1; }
+            # shellcheck disable=SC1090
+            source "$POSTGRES_ENV_FILE"
+            [[ -n "${EXERCISE_POSTGRES_URL:-}" ]] || { echo "ERROR: missing EXERCISE_POSTGRES_URL in ${POSTGRES_ENV_FILE}"; rm -f .env.new; exit 1; }
+            awk '\''!/^(POSTGRES_URL|CATALOG_POSTGRES_RESTORE_ON_MISS)=/'\'' .env.new > .env.cleaned
+            mv .env.cleaned .env.new
+            {
+              printf "\nPOSTGRES_URL=%s\n" "$EXERCISE_POSTGRES_URL"
+              printf "CATALOG_POSTGRES_RESTORE_ON_MISS=true\n"
+            } >> .env.new
             mv .env.new .env
           '
 
@@ -130,8 +146,8 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ssh "$VPS_USER@$VPS_HOST" "

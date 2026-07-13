@@ -8,14 +8,14 @@ import {
   LocalizationStatus,
 } from '../domain/dtos';
 import {
-  addTokenPrefixToDictionary,
-  addTokenToDictionary,
+  CatalogMetadata,
   clearCatalog,
   getCatalogDocument,
   getCatalogDocumentIds,
   getCatalogDocuments,
   getCatalogLanguages,
   getCatalogMetadata,
+  getExerciseIndexedTokens,
   getActiveCatalogVersion,
   getIdsByExactToken,
   getIdsByPrefix,
@@ -25,28 +25,29 @@ import {
   getPopularityScores,
   getSynonymTargets,
   getTokensByPrefix,
-  incrementPopularity,
+  incrementPopularityMany,
   createCatalogVersion,
   registerSynonym,
+  removeExerciseTokenIndexes,
   saveCatalogDocument,
   setActiveCatalogVersion,
   setCatalogMetadata,
+  setExerciseIndexedTokens,
   setLocalizationStatus,
-  upsertExactIndex,
-  upsertIndexPrefix,
+  upsertExerciseTokenIndexes,
 } from '../infrastructure/catalog-repository';
-import { forwardToYMove } from '../infrastructure/ymove-client';
-import { translateTexts } from '../infrastructure/translate-client';
+import { forwardToYMove, YMoveError } from '../infrastructure/ymove-client';
+import { translateQueryToEnglish, translateTexts } from '../infrastructure/translate-client';
 import { logger } from '../logger';
 import { incCounter } from '../observability/metrics';
 import { normalizeLanguage } from './lang-normalizer';
 import { getTopExerciseSeedNames } from '../data/top-exercise-seeds';
 import {
-  buildTokenPrefixes,
   levenshteinDistance,
   normalizeSearchText,
   tokenizeSearchText,
 } from './catalog-text';
+import { restoreCatalogCacheFromPostgresIfConfigured } from './catalog-postgres-cache.service';
 
 const SUPPORTED_LANGUAGES = getCatalogLanguages();
 const NON_ENGLISH_LANGUAGES = SUPPORTED_LANGUAGES.filter((lang) => lang !== 'en');
@@ -56,6 +57,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 const CANDIDATE_POOL_SIZE = 200;
 const MAX_CONSECUTIVE_SEED_FAILURES_BEFORE_ABORT = 5;
+const ON_DEMAND_PROVIDER_PAGE_SIZE = 20;
 
 const BASE_SYNONYMS: Record<string, Record<string, string[]>> = {
   en: {
@@ -157,9 +159,15 @@ export interface ReviewInput {
 
 interface CatalogHealthResponse {
   ready: boolean;
+  status: 'ready' | 'stale_served' | 'redis_unavailable' | 'not_ready' | 'disabled';
   syncedAt: string | null;
   exerciseCount: number;
   stale: boolean;
+}
+
+interface CatalogSnapshot {
+  version: string;
+  meta: CatalogMetadata;
 }
 
 function sanitizePage(value: number | undefined): number {
@@ -182,6 +190,10 @@ function buildYMoveSeedSearchUrl(seedName: string, page: number, pageSize: numbe
   url.searchParams.set('pageSize', String(pageSize));
   url.searchParams.set('search', seedName);
   return url.toString();
+}
+
+function buildYMoveExerciseDetailUrl(exerciseId: string): string {
+  return `https://${config.allowedUpstreamHost}${config.allowedUpstreamPath}/${encodeURIComponent(exerciseId)}`;
 }
 
 function extractLocalizationFromExercise(
@@ -242,7 +254,7 @@ async function localizeExercise(
     };
   } catch (err) {
     logger.warn({ requestId, lang, exerciseId: exercise.id, err: String(err) }, 'Catalog localization fallback to English');
-    return extractLocalizationFromExercise(exercise, 'machine');
+    return extractLocalizationFromExercise(exercise, 'fallback');
   }
 }
 
@@ -260,22 +272,24 @@ function collectTokensForLanguage(doc: CatalogExerciseDocumentDTO, lang: string)
   return tokenizeSearchText(tokenSource);
 }
 
+async function indexExerciseLanguage(
+  doc: CatalogExerciseDocumentDTO,
+  lang: string,
+  version: string,
+): Promise<void> {
+  const tokens = collectTokensForLanguage(doc, lang);
+  const uniqueTokens = [...new Set(tokens)];
+  const previousTokens = await getExerciseIndexedTokens(lang, doc.id, version);
+
+  await removeExerciseTokenIndexes(lang, doc.id, previousTokens, version);
+
+  await upsertExerciseTokenIndexes(lang, doc.id, uniqueTokens, version);
+  await setExerciseIndexedTokens(lang, doc.id, uniqueTokens, version);
+}
+
 async function indexExercise(doc: CatalogExerciseDocumentDTO, version: string): Promise<void> {
   for (const lang of SUPPORTED_LANGUAGES) {
-    const tokens = collectTokensForLanguage(doc, lang);
-    const uniqueTokens = [...new Set(tokens)];
-
-    for (const token of uniqueTokens) {
-      await addTokenToDictionary(lang, token, version);
-      if (token.length >= 2) {
-        await addTokenPrefixToDictionary(lang, token.slice(0, 2), token, version);
-      }
-      await upsertExactIndex(lang, token, doc.id, 100, version);
-
-      for (const prefix of buildTokenPrefixes(token)) {
-        await upsertIndexPrefix(lang, prefix, doc.id, 60, version);
-      }
-    }
+    await indexExerciseLanguage(doc, lang, version);
   }
 }
 
@@ -298,6 +312,43 @@ async function registerBaseSynonyms(version: string): Promise<void> {
       }
     }
   }
+}
+
+async function localizeCatalogExercise(
+  exercise: ExerciseDTO,
+  version: string,
+  requestId: string,
+): Promise<CatalogExerciseDocumentDTO> {
+  const localizations: Record<string, LocalizedExerciseFieldsDTO> = {
+    en: extractLocalizationFromExercise(exercise, 'source'),
+  };
+
+  await setLocalizationStatus(exercise.id, 'en', localizations.en.status, version);
+
+  for (const lang of NON_ENGLISH_LANGUAGES) {
+    localizations[lang] = await localizeExercise(exercise, lang, requestId);
+    await setLocalizationStatus(exercise.id, lang, localizations[lang].status, version);
+  }
+
+  return {
+    id: exercise.id,
+    slug: exercise.slug,
+    muscleGroup: exercise.muscleGroup,
+    secondaryMuscles: exercise.secondaryMuscles,
+    equipment: exercise.equipment,
+    category: exercise.category,
+    difficulty: exercise.difficulty,
+    hasVideo: exercise.hasVideo,
+    hasVideoWhite: exercise.hasVideoWhite,
+    hasVideoGym: exercise.hasVideoGym,
+    videoDurationSecs: exercise.videoDurationSecs,
+    exerciseType: exercise.exerciseType,
+    videoUrl: exercise.videoUrl,
+    videoHlsUrl: exercise.videoHlsUrl,
+    thumbnailUrl: exercise.thumbnailUrl,
+    videos: exercise.videos,
+    localizations,
+  };
 }
 
 function mapToCatalogExercise(doc: CatalogExerciseDocumentDTO, lang: string): CatalogExerciseDTO {
@@ -366,9 +417,12 @@ function paginateIds(ids: string[], page: number, pageSize: number): string[] {
   return ids.slice(start, start + pageSize);
 }
 
-async function getPopularCatalogPage(lang: string, page: number, pageSize: number): Promise<string[]> {
-  const activeVersion = await getActiveCatalogVersion();
-  const version = activeVersion ?? 'v1';
+async function getPopularCatalogPage(
+  lang: string,
+  page: number,
+  pageSize: number,
+  version: string,
+): Promise<string[]> {
   const needed = page * pageSize;
   const ids = await getPopularExerciseIds(lang, Math.max(needed, pageSize), version);
   if (ids.length >= needed) {
@@ -380,6 +434,197 @@ async function getPopularCatalogPage(lang: string, page: number, pageSize: numbe
   }
 
   return getCatalogDocumentIds(page, pageSize, version);
+}
+
+async function getSearchableCatalogSnapshot(): Promise<CatalogSnapshot> {
+  const activeVersion = await getActiveCatalogVersion();
+  if (!activeVersion) {
+    throw new CatalogError('Catalog is not ready', 503, 'catalog_not_ready');
+  }
+
+  const meta = await getCatalogMetadata(activeVersion);
+  if (!meta || meta.exerciseCount <= 0) {
+    throw new CatalogError('Catalog is not ready', 503, 'catalog_not_ready');
+  }
+
+  return {
+    version: activeVersion,
+    meta,
+  };
+}
+
+async function getOrCreateWritableCatalogSnapshot(requestId: string): Promise<CatalogSnapshot> {
+  let activeVersion = await getActiveCatalogVersion();
+  if (!activeVersion && await restoreCatalogCacheFromPostgresIfConfigured(requestId)) {
+    activeVersion = await getActiveCatalogVersion();
+  }
+
+  if (activeVersion) {
+    const meta = await getCatalogMetadata(activeVersion);
+    return {
+      version: activeVersion,
+      meta: meta ?? {
+        lastSyncedAt: new Date().toISOString(),
+        exerciseCount: 0,
+      },
+    };
+  }
+
+  const version = await createCatalogVersion();
+  await registerBaseSynonyms(version);
+  await setActiveCatalogVersion(version);
+  const meta = {
+    lastSyncedAt: new Date().toISOString(),
+    exerciseCount: 0,
+    seedQueryCount: 0,
+    successfulSeedQueries: 0,
+    failedSeedQueries: 0,
+    fetchedRows: 0,
+    duplicateRows: 0,
+  };
+  await setCatalogMetadata(meta, version);
+  logger.info({ requestId, version }, 'Created catalog version for on-demand provider fill');
+
+  return { version, meta };
+}
+
+async function scoreQueryToken(
+  lang: string,
+  token: string,
+  scores: Map<string, number>,
+  activeVersion: string,
+): Promise<void> {
+  const exactIds = await getIdsByExactToken(lang, token, CANDIDATE_POOL_SIZE, activeVersion);
+  createScoreMapFromIds(exactIds, 100, scores);
+
+  const prefixIds = await getIdsByPrefix(lang, token, CANDIDATE_POOL_SIZE, activeVersion);
+  createScoreMapFromIds(prefixIds, 70, scores);
+
+  const synonymTargets = await getSynonymTargets(lang, token, activeVersion);
+  for (const synonymToken of synonymTargets) {
+    const synonymIds = await getIdsByExactToken(lang, synonymToken, CANDIDATE_POOL_SIZE, activeVersion);
+    createScoreMapFromIds(synonymIds, 50, scores);
+  }
+
+  await applyTypoTolerance(lang, token, scores, activeVersion);
+}
+
+async function rankCatalogIdsForQuery(
+  query: string,
+  responseLang: string,
+  version: string,
+): Promise<string[]> {
+  const tokens = tokenizeSearchText(query);
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const scores = new Map<string, number>();
+  for (const token of tokens) {
+    for (const searchLang of SUPPORTED_LANGUAGES) {
+      await scoreQueryToken(searchLang, token, scores, version);
+    }
+  }
+
+  const candidateIds = [...scores.keys()];
+  const popularityScores = await getPopularityScores(responseLang, candidateIds, version);
+  const docs = await getCatalogDocuments(candidateIds, version);
+
+  for (const doc of docs) {
+    const localizedStatus = doc.localizations[responseLang]?.status ?? 'fallback';
+    const reviewBoost = localizedStatus === 'reviewed' || localizedStatus === 'source' ? 15 : 0;
+    scores.set(
+      doc.id,
+      (scores.get(doc.id) ?? 0) + (popularityScores[doc.id] ?? 0) + reviewBoost,
+    );
+  }
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+}
+
+async function fetchProviderExercisesForQuery(query: string, pageSize: number, requestId: string): Promise<ExerciseDTO[]> {
+  const providerQueries: string[] = [query];
+
+  try {
+    const translated = await translateQueryToEnglish(query, undefined, requestId);
+    if (normalizeSearchText(translated) && normalizeSearchText(translated) !== normalizeSearchText(query)) {
+      providerQueries.push(translated);
+    }
+  } catch (err) {
+    logger.warn({ requestId, query, err: String(err) }, 'Catalog provider fill query translation failed');
+  }
+
+  const seenQueries = new Set<string>();
+  for (const providerQuery of providerQueries) {
+    const normalizedProviderQuery = normalizeSearchText(providerQuery);
+    if (!normalizedProviderQuery || seenQueries.has(normalizedProviderQuery)) {
+      continue;
+    }
+    seenQueries.add(normalizedProviderQuery);
+
+    const url = buildYMoveSeedSearchUrl(providerQuery, 1, pageSize);
+    const upstream = await forwardToYMove(url, 'GET', requestId);
+    if (upstream.exercises.length > 0) {
+      return upstream.exercises;
+    }
+  }
+
+  return [];
+}
+
+async function fillCatalogFromProviderMiss(
+  query: string,
+  pageSize: number,
+  requestId: string,
+): Promise<CatalogSnapshot> {
+  const snapshot = await getOrCreateWritableCatalogSnapshot(requestId);
+  const providerExercises = await fetchProviderExercisesForQuery(query, pageSize, requestId);
+  if (providerExercises.length === 0) {
+    return snapshot;
+  }
+
+  let newExerciseCount = 0;
+  for (const exercise of providerExercises) {
+    const existing = await getCatalogDocument(exercise.id, snapshot.version);
+    if (existing) {
+      continue;
+    }
+
+    const doc = await localizeCatalogExercise(exercise, snapshot.version, requestId);
+    await saveCatalogDocument(doc, snapshot.version);
+    await indexExercise(doc, snapshot.version);
+    newExerciseCount += 1;
+  }
+
+  if (newExerciseCount === 0) {
+    return snapshot;
+  }
+
+  const nextMeta = {
+    ...snapshot.meta,
+    lastSyncedAt: snapshot.meta.lastSyncedAt || new Date().toISOString(),
+    exerciseCount: snapshot.meta.exerciseCount + newExerciseCount,
+    fetchedRows: (snapshot.meta.fetchedRows ?? 0) + providerExercises.length,
+  };
+  await setCatalogMetadata(nextMeta, snapshot.version);
+
+  logger.info(
+    {
+      requestId,
+      version: snapshot.version,
+      query,
+      providerRows: providerExercises.length,
+      newExerciseCount,
+    },
+    'Catalog provider miss fill finished',
+  );
+
+  return {
+    version: snapshot.version,
+    meta: nextMeta,
+  };
 }
 
 export async function ensureCatalogSynced(requestId: string): Promise<CatalogSyncOutcome> {
@@ -458,34 +703,7 @@ export async function ensureCatalogSynced(requestId: string): Promise<CatalogSyn
               seenExerciseIds.add(exercise.id);
               uniqueRowsInPage += 1;
 
-              const localizations: Record<string, LocalizedExerciseFieldsDTO> = {
-                en: extractLocalizationFromExercise(exercise, 'reviewed'),
-              };
-
-              for (const lang of NON_ENGLISH_LANGUAGES) {
-                localizations[lang] = await localizeExercise(exercise, lang, requestId);
-                await setLocalizationStatus(exercise.id, lang, localizations[lang].status, newVersion);
-              }
-
-              const doc: CatalogExerciseDocumentDTO = {
-                id: exercise.id,
-                slug: exercise.slug,
-                muscleGroup: exercise.muscleGroup,
-                secondaryMuscles: exercise.secondaryMuscles,
-                equipment: exercise.equipment,
-                category: exercise.category,
-                difficulty: exercise.difficulty,
-                hasVideo: exercise.hasVideo,
-                hasVideoWhite: exercise.hasVideoWhite,
-                hasVideoGym: exercise.hasVideoGym,
-                videoDurationSecs: exercise.videoDurationSecs,
-                exerciseType: exercise.exerciseType,
-                videoUrl: exercise.videoUrl,
-                videoHlsUrl: exercise.videoHlsUrl,
-                thumbnailUrl: exercise.thumbnailUrl,
-                videos: exercise.videos,
-                localizations,
-              };
+              const doc = await localizeCatalogExercise(exercise, newVersion, requestId);
 
               await saveCatalogDocument(doc, newVersion);
               await indexExercise(doc, newVersion);
@@ -578,68 +796,69 @@ export async function searchCatalog(input: SearchInput, requestId: string): Prom
   const lang = normalizeLanguage(input.lang);
   const normalizedQuery = normalizeSearchText(input.query ?? '');
 
-  await ensureCatalogSynced(requestId);
-
-  const activeVersion = await getActiveCatalogVersion();
-  const version = activeVersion ?? 'v1';
-  const meta = await getCatalogMetadata(version);
-
-  let rankedIds: string[] = [];
-  let totalOverride: number | null = null;
-  const scores = new Map<string, number>();
-
-  if (!normalizedQuery || normalizedQuery.length < config.catalogMinQueryLength) {
-    rankedIds = await getPopularCatalogPage(lang, page, pageSize);
-    totalOverride = meta?.exerciseCount ?? rankedIds.length;
-  } else {
-    const tokens = tokenizeSearchText(normalizedQuery);
-
-    if (tokens.length === 0) {
-      rankedIds = await getPopularCatalogPage(lang, page, pageSize);
-      totalOverride = meta?.exerciseCount ?? rankedIds.length;
-    } else {
-      for (const token of tokens) {
-        const exactIds = await getIdsByExactToken(lang, token, CANDIDATE_POOL_SIZE, version);
-        createScoreMapFromIds(exactIds, 100, scores);
-
-        const prefixIds = await getIdsByPrefix(lang, token, CANDIDATE_POOL_SIZE, version);
-        createScoreMapFromIds(prefixIds, 70, scores);
-
-        const synonymTargets = await getSynonymTargets(lang, token, version);
-        for (const synonymToken of synonymTargets) {
-          const synonymIds = await getIdsByExactToken(lang, synonymToken, CANDIDATE_POOL_SIZE, version);
-          createScoreMapFromIds(synonymIds, 50, scores);
-        }
-
-        await applyTypoTolerance(lang, token, scores, version);
+  let snapshot: CatalogSnapshot | null = null;
+  let snapshotError: unknown = null;
+  try {
+    snapshot = await getSearchableCatalogSnapshot();
+  } catch (err) {
+    snapshotError = err;
+    if (await restoreCatalogCacheFromPostgresIfConfigured(requestId)) {
+      try {
+        snapshot = await getSearchableCatalogSnapshot();
+      } catch (restoreErr) {
+        snapshotError = restoreErr;
       }
+    }
 
-      const candidateIds = [...scores.keys()];
-      const popularityScores = await getPopularityScores(lang, candidateIds, version);
-
-      const docs = await getCatalogDocuments(candidateIds, version);
-      for (const doc of docs) {
-        const localizedStatus = doc.localizations[lang]?.status ?? 'machine';
-        const reviewBoost = localizedStatus === 'reviewed' ? 15 : 0;
-        scores.set(
-          doc.id,
-          (scores.get(doc.id) ?? 0) + (popularityScores[doc.id] ?? 0) + reviewBoost,
-        );
-      }
-
-      rankedIds = [...scores.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([id]) => id);
+    if (!snapshot && normalizedQuery.length < config.catalogMinQueryLength) {
+      throw snapshotError;
+    }
+    if (!snapshot) {
+      logger.warn({ requestId, err: String(snapshotError) }, 'Catalog snapshot unavailable; attempting provider fill');
     }
   }
 
+  let rankedIds: string[] = [];
+  let totalOverride: number | null = null;
+
+  if (!normalizedQuery || normalizedQuery.length < config.catalogMinQueryLength) {
+    if (!snapshot) {
+      throw new CatalogError('Catalog is not ready', 503, 'catalog_not_ready');
+    }
+    const { version, meta } = snapshot;
+    rankedIds = await getPopularCatalogPage(lang, page, pageSize, version);
+    totalOverride = meta.exerciseCount;
+  } else {
+    if (snapshot) {
+      rankedIds = await rankCatalogIdsForQuery(normalizedQuery, lang, snapshot.version);
+    }
+
+    if (rankedIds.length === 0) {
+      try {
+        snapshot = await fillCatalogFromProviderMiss(input.query ?? normalizedQuery, Math.max(pageSize, ON_DEMAND_PROVIDER_PAGE_SIZE), requestId);
+      } catch (err) {
+        if (err instanceof CatalogError) {
+          throw err;
+        }
+        logger.warn({ requestId, err: String(err) }, 'Catalog provider miss fill failed');
+        throw new CatalogError('Catalog provider lookup failed', 502, 'catalog_provider_failed');
+      }
+      rankedIds = await rankCatalogIdsForQuery(normalizedQuery, lang, snapshot.version);
+    }
+  }
+
+  if (!snapshot) {
+    throw new CatalogError('Catalog is not ready', 503, 'catalog_not_ready');
+  }
+
+  const { version, meta } = snapshot;
   const total = totalOverride ?? rankedIds.length;
   const pagedIds = totalOverride === null ? paginateIds(rankedIds, page, pageSize) : rankedIds;
   const docs = await getCatalogDocuments(pagedIds, version);
   const results = docs.map((doc) => mapToCatalogExercise(doc, lang));
 
   if (results.length > 0) {
-    await Promise.allSettled(results.map((result) => incrementPopularity(lang, result.id, 1, version)));
+    await incrementPopularityMany(lang, results.map((result) => result.id), 1, version);
   }
 
   incCounter('catalog_search_requests_total', { lang, status: 'success' });
@@ -653,7 +872,7 @@ export async function searchCatalog(input: SearchInput, requestId: string): Prom
       lang,
       normalizedQuery,
       tookMs: Date.now() - start,
-      catalogSyncedAt: meta?.lastSyncedAt ?? null,
+      catalogSyncedAt: meta.lastSyncedAt,
     },
   };
 }
@@ -662,19 +881,42 @@ export async function getCatalogHealth(requestId: string): Promise<CatalogHealth
   if (!config.catalogEnabled) {
     return {
       ready: false,
+      status: 'disabled',
       syncedAt: null,
       exerciseCount: 0,
       stale: true,
     };
   }
 
-  const activeVersion = await getActiveCatalogVersion();
-  const version = activeVersion ?? 'v1';
-  const metadata = await getCatalogMetadata(version);
+  let activeVersion: string | null;
+  let metadata: CatalogMetadata | null;
+
+  try {
+    activeVersion = await getActiveCatalogVersion();
+    const version = activeVersion ?? 'v1';
+    metadata = await getCatalogMetadata(version);
+  } catch (err) {
+    logger.warn({ requestId, err: String(err) }, 'Catalog health repository read failed');
+    return {
+      ready: false,
+      status: 'redis_unavailable',
+      syncedAt: null,
+      exerciseCount: 0,
+      stale: true,
+    };
+  }
+
+  if (!metadata || metadata.exerciseCount <= 0) {
+    if (await restoreCatalogCacheFromPostgresIfConfigured(requestId)) {
+      activeVersion = await getActiveCatalogVersion();
+      metadata = await getCatalogMetadata(activeVersion ?? 'v1');
+    }
+  }
 
   if (!metadata || metadata.exerciseCount <= 0) {
     return {
       ready: false,
+      status: 'not_ready',
       syncedAt: metadata?.lastSyncedAt ?? null,
       exerciseCount: metadata?.exerciseCount ?? 0,
       stale: true,
@@ -687,6 +929,7 @@ export async function getCatalogHealth(requestId: string): Promise<CatalogHealth
 
   return {
     ready: true,
+    status: stale ? 'stale_served' : 'ready',
     syncedAt: metadata.lastSyncedAt,
     exerciseCount: metadata.exerciseCount,
     stale,
@@ -720,7 +963,56 @@ export async function reviewCatalogLocalization(input: ReviewInput): Promise<voi
 
   await saveCatalogDocument(doc, version);
   await setLocalizationStatus(input.exerciseId, lang, input.status, version);
-  await indexExercise(doc, version);
+  await indexExerciseLanguage(doc, lang, version);
+}
+
+export async function getCatalogExerciseById(
+  exerciseId: string,
+  langInput: string | undefined,
+  requestId: string,
+): Promise<CatalogExerciseDTO | null> {
+  const id = exerciseId.trim();
+  if (!id) {
+    throw new CatalogError('Exercise id is required', 400, 'bad_request');
+  }
+
+  const lang = normalizeLanguage(langInput);
+  const snapshot = await getOrCreateWritableCatalogSnapshot(requestId);
+  const existing = await getCatalogDocument(id, snapshot.version);
+  if (existing) {
+    return mapToCatalogExercise(existing, lang);
+  }
+
+  let upstream;
+  try {
+    upstream = await forwardToYMove(buildYMoveExerciseDetailUrl(id), 'GET', requestId);
+  } catch (err) {
+    if (err instanceof YMoveError && err.statusCode === 404) {
+      return null;
+    }
+    logger.warn({ requestId, exerciseId: id, err: String(err) }, 'Catalog detail provider lookup failed');
+    throw new CatalogError('Catalog provider lookup failed', 502, 'catalog_provider_failed');
+  }
+  const exercise = upstream.exercises.find((candidate) => candidate.id === id) ?? upstream.exercises[0];
+  if (!exercise) {
+    return null;
+  }
+
+  const doc = await localizeCatalogExercise(exercise, snapshot.version, requestId);
+  await saveCatalogDocument(doc, snapshot.version);
+  await indexExercise(doc, snapshot.version);
+
+  await setCatalogMetadata(
+    {
+      ...snapshot.meta,
+      exerciseCount: snapshot.meta.exerciseCount + 1,
+      fetchedRows: (snapshot.meta.fetchedRows ?? 0) + 1,
+    },
+    snapshot.version,
+  );
+
+  const persisted = await getCatalogDocument(doc.id, snapshot.version);
+  return mapToCatalogExercise(persisted ?? doc, lang);
 }
 
 export async function getCatalogLocalizationStatus(

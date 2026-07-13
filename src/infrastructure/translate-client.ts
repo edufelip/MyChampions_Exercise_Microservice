@@ -115,12 +115,12 @@ export async function translateTexts(
 }
 
 /**
- * Translate a single query string from English into the target language.
- * Returns the original text if target is English.
+ * Translate a single query string into English.
+ * When sourceLang is omitted, Google Translate detects the source language.
  */
 export async function translateQueryToEnglish(
   query: string,
-  sourceLang: string,
+  sourceLang?: string,
   requestId?: string,
 ): Promise<string> {
   if (sourceLang === 'en') {
@@ -137,7 +137,7 @@ export async function translateQueryToEnglish(
         {
           q: [query],
           target: 'en',
-          source: sourceLang,
+          ...(sourceLang ? { source: sourceLang } : {}),
           format: 'text',
         },
         {

@@ -19,6 +19,7 @@ jest.mock('../../services/catalog.service', () => {
   return {
     searchCatalog: jest.fn(),
     getCatalogHealth: jest.fn(),
+    getCatalogExerciseById: jest.fn(),
     reviewCatalogLocalization: jest.fn(),
     CatalogError,
   };
@@ -45,6 +46,7 @@ jest.mock('../../services/provider-benchmark.service', () => {
 
 import {
   CatalogError,
+  getCatalogExerciseById,
   getCatalogHealth,
   reviewCatalogLocalization,
   searchCatalog,
@@ -56,6 +58,7 @@ import {
 
 const mockedSearchCatalog = searchCatalog as jest.MockedFunction<typeof searchCatalog>;
 const mockedGetCatalogHealth = getCatalogHealth as jest.MockedFunction<typeof getCatalogHealth>;
+const mockedGetCatalogExerciseById = getCatalogExerciseById as jest.MockedFunction<typeof getCatalogExerciseById>;
 const mockedReviewCatalogLocalization = reviewCatalogLocalization as jest.MockedFunction<typeof reviewCatalogLocalization>;
 const mockedRunCatalogProviderBenchmark = runCatalogProviderBenchmark as jest.MockedFunction<typeof runCatalogProviderBenchmark>;
 
@@ -112,6 +115,7 @@ describe('catalog endpoints', () => {
   it('GET /catalog/health returns 200', async () => {
     mockedGetCatalogHealth.mockResolvedValue({
       ready: true,
+      status: 'ready',
       syncedAt: new Date().toISOString(),
       exerciseCount: 100,
       stale: false,
@@ -121,6 +125,48 @@ describe('catalog endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ready).toBe(true);
+  });
+
+  it('GET /catalog/exercises/:id returns localized exercise detail', async () => {
+    mockedGetCatalogExerciseById.mockResolvedValue({
+      id: 'squat-1',
+      slug: 'back-squat',
+      title: 'Back Squat',
+      description: 'desc',
+      instructions: ['step'],
+      importantPoints: ['point'],
+      muscleGroup: 'quads',
+      secondaryMuscles: null,
+      equipment: 'barbell',
+      category: 'strength',
+      difficulty: 'intermediate',
+      hasVideo: true,
+      hasVideoWhite: false,
+      hasVideoGym: true,
+      videoDurationSecs: null,
+      exerciseType: ['strength'],
+      videoUrl: null,
+      videoHlsUrl: null,
+      thumbnailUrl: 'https://cdn/thumb.jpg',
+      videos: null,
+      localizationStatus: 'source',
+    });
+
+    const res = await request(app).get('/catalog/exercises/squat-1?lang=en-US');
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('squat-1');
+    expect(res.body.title).toBe('Back Squat');
+    expect(mockedGetCatalogExerciseById).toHaveBeenCalledWith('squat-1', 'en-US', expect.any(String));
+  });
+
+  it('GET /catalog/exercises/:id returns 404 when catalog and provider miss', async () => {
+    mockedGetCatalogExerciseById.mockResolvedValue(null);
+
+    const res = await request(app).get('/catalog/exercises/missing?lang=en-US');
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('not_found');
   });
 
   it('POST /catalog/review returns 204', async () => {

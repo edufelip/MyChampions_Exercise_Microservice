@@ -9,10 +9,12 @@ import rateLimit from 'express-rate-limit';
 import { randomUUID } from 'crypto';
 import { config } from './config';
 import { logger } from './logger';
+import { RedisRateLimitStore } from './infrastructure/rate-limit-store';
 import { proxyDeprecatedController } from './controllers/proxy.controller';
 import { renderPrometheusMetrics } from './observability/metrics';
 import {
   catalogBenchmarkController,
+  catalogExerciseDetailController,
   catalogHealthController,
   reviewCatalogController,
   searchCatalogController,
@@ -55,6 +57,10 @@ export function createApp(): express.Application {
       max: config.rateLimitMax,
       standardHeaders: true,
       legacyHeaders: false,
+      passOnStoreError: true,
+      ...(config.rateLimitRedisEnabled
+        ? { store: new RedisRateLimitStore('rate-limit:global:') }
+        : {}),
       message: (_req: Request, res: Response) => ({
         error: {
           code: 'too_many_requests',
@@ -79,6 +85,7 @@ export function createApp(): express.Application {
 
   app.post('/proxy', proxyDeprecatedController);
   app.post('/catalog/search', validateCatalogSearchBody, searchCatalogController);
+  app.get('/catalog/exercises/:id', catalogExerciseDetailController);
   app.post('/catalog/review', validateCatalogReviewAuth, validateCatalogReviewBody, reviewCatalogController);
   app.post('/catalog/benchmark', validateCatalogReviewAuth, validateCatalogBenchmarkBody, catalogBenchmarkController);
   app.get('/catalog/health', catalogHealthController);

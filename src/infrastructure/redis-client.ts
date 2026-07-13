@@ -2,8 +2,8 @@
  * Redis client wrapper.
  *
  * Creates and exports a lazily-connected ioredis instance. The client
- * degrades gracefully: if Redis is unavailable, operations reject and the
- * service continues without caching.
+ * Redis is the catalog runtime store. Callers decide whether a failed command
+ * can degrade gracefully or must return a controlled catalog error.
  */
 import Redis from 'ioredis';
 import { config } from '../config';
@@ -29,7 +29,7 @@ export function getRedisClient(): Redis {
   });
 
   client.on('error', (err: Error) => {
-    logger.warn({ err: err.message }, 'Redis error – cache layer degraded');
+    logger.warn({ err: err.message }, 'Redis command failed');
   });
 
   _client = client;

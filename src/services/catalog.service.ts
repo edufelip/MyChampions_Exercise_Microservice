@@ -789,9 +789,8 @@ export async function ensureCatalogSynced(requestId: string): Promise<CatalogSyn
   }
 }
 
-export async function searchCatalog(input: SearchInput, _requestId: string): Promise<CatalogSearchResponseDTO> {
+export async function searchCatalog(input: SearchInput, requestId: string): Promise<CatalogSearchResponseDTO> {
   const start = Date.now();
-  const requestId = _requestId;
   const page = sanitizePage(input.page);
   const pageSize = sanitizePageSize(input.pageSize);
   const lang = normalizeLanguage(input.lang);

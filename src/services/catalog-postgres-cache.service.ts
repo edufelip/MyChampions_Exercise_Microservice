@@ -26,7 +26,10 @@ export async function restoreCatalogCacheFromPostgresIfConfigured(requestId: str
         'Exercise Redis catalog restored from Postgres source',
       );
       return true;
-    })().finally(() => {
+    })().catch((error) => {
+      logger.warn({ requestId, err: String(error) }, 'Exercise Redis catalog restore from Postgres failed');
+      return false;
+    }).finally(() => {
       activeRestorePromise = null;
     });
   }

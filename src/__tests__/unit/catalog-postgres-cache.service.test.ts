@@ -56,6 +56,12 @@ describe('restoreCatalogCacheFromPostgresIfConfigured', () => {
     expect(rebuildRedisCatalogFromPostgres).toHaveBeenCalledTimes(1);
   });
 
+  it('returns false when the best-effort restore fails', async () => {
+    jest.mocked(rebuildRedisCatalogFromPostgres).mockRejectedValueOnce(new Error('Postgres unavailable'));
+
+    await expect(restoreCatalogCacheFromPostgresIfConfigured('req-1')).resolves.toBe(false);
+  });
+
   it('does not restore when Postgres is not configured', async () => {
     Object.assign(config, { postgresUrl: null });
 

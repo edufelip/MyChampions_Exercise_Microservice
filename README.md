@@ -89,6 +89,15 @@ It syncs top exercise seeds from YMove, machine-translates localized fields, per
 
 Copy `.env.example` to `.env`.
 
+For local catalog storage backed by Dockerized Postgres and Redis, use the
+parent workspace runbook at `../docs/local-catalog-db.md` and start from
+`.env.local.example`. The service `dev` script preloads `.env.local`. The local exercise
+database connection is:
+
+```bash
+POSTGRES_URL=postgres://mychampions_local:mychampions_local_password@localhost:15432/mychampions_exercise_catalog_local
+```
+
 Required:
 
 - `YMOVE_API_KEY`
@@ -127,14 +136,41 @@ Common configuration:
 ## Local Run
 
 ```bash
-npm install
-npm run dev
+# From mychampionsapi-exercises:
+bun install
+cp .env.local.example .env.local
+bun run dev
+```
+
+Start local storage from the parent MyChampions workspace before running the service:
+
+```bash
+(cd .. && bun run local:db:up)
+```
+
+To refresh local catalog data from production Postgres:
+
+```bash
+(cd .. && bun run local:db:mirror)
+```
+
+The mirror command overwrites only local databases ending in `_local` and reads
+production through `ssh digiocean`; it does not write to production.
+
+The existing catalog migration and Redis rebuild scripts are unchanged. Export
+the local env before running them, for example:
+
+```bash
+set -a
+source ./.env.local
+set +a
+DRY_RUN=false CONFIRM_REDIS_REBUILD=true bun run rebuild:catalog:redis:dev
 ```
 
 Health check:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3300/health
 ```
 
 ## Docker
@@ -153,7 +189,7 @@ Redis is configured with AOF persistence, `maxmemory 512mb`, and `noeviction` po
 ## Test and Lint
 
 ```bash
-npm run lint
+bun run lint
 npm test
 ```
 

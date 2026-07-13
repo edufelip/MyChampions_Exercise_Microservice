@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "DOTENV_CONFIG_PATH=.env.local ts-node -r dotenv/config src/index.ts",
     "test": "jest",
     "test:unit": "jest --testPathPattern='src/__tests__/unit'",
     "test:integration": "jest --testPathPattern='src/__tests__/integration'",

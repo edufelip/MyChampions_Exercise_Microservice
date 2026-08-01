@@ -37,8 +37,8 @@ can't be sure a narrower run is safe.
 - The classifier script itself (`scripts/ci/**`)
 - Any path that isn't recognized as one of the above, `src/**`, or a
   known-inert path (`README.md`, `CONTEXT.md`, `docs/**`, `*.md`,
-  `.gitignore`, `.env*.example`, `.dockerignore`) — fail conservative, not
-  silent.
+  `.gitignore`, `.env.example`, `.env.local.example`, `.dockerignore`) —
+  fail conservative, not silent.
 
 ## Verifying locally
 

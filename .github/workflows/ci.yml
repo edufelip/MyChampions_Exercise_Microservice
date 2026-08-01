@@ -13,6 +13,48 @@ env:
   IMAGE_REPO: ghcr.io/edufelip/mychampions_exercise_microservice
 
 jobs:
+  impact:
+    name: Classify change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full_scope: ${{ steps.classify.outputs.full_scope }}
+      merge_base: ${{ steps.classify.outputs.merge_base }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Pushes to main are the authoritative build (post-merge or a direct
+      # push), so they always run the full suite. Only PRs get narrowed. The
+      # merge-base is computed explicitly inside classify-change-scope.ts
+      # (not diffed against the base branch tip) so commits that land on main
+      # after a PR branched off are never misattributed to that PR's diff.
+      - id: classify
+        name: Classify changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "full_scope=true" >> "$GITHUB_OUTPUT"
+            echo "merge_base=" >> "$GITHUB_OUTPUT"
+          else
+            npx ts-node scripts/ci/classify-change-scope.ts "$BASE_SHA" "$HEAD_SHA"
+          fi
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -37,9 +79,13 @@ jobs:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [impact]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -51,13 +97,22 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --coverage
         env:
           NODE_ENV: test
           PORT: "3000"
           YMOVE_API_KEY: test-ymove-key
           GOOGLE_TRANSLATE_API_KEY: test-translate-key
           REDIS_URL: redis://localhost:6379
+          FULL_SCOPE: ${{ needs.impact.outputs.full_scope }}
+          MERGE_BASE: ${{ needs.impact.outputs.merge_base }}
+        run: |
+          if [[ "$FULL_SCOPE" != "true" && -n "$MERGE_BASE" ]]; then
+            echo "Running tests related to changes since $MERGE_BASE"
+            npx jest --changedSince="$MERGE_BASE" --passWithNoTests --coverage
+          else
+            echo "Running full test suite"
+            npm test -- --coverage
+          fi
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4

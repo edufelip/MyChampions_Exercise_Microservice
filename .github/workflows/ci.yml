@@ -127,9 +127,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [lint]
+    env:
+      NODE_ENV: test
+      RATE_LIMIT_REDIS_ENABLED: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -141,7 +153,7 @@ jobs:
         run: npm ci
 
       - name: Run consumer contract tests
-        run: npm run test:contract
+        run: npm run test:contract -- --detectOpenHandles
 
   build:
     name: TypeScript Build

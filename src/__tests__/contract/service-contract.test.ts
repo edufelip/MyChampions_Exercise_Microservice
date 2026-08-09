@@ -92,12 +92,14 @@ describe('exercise service consumer contract', () => {
       .send({ query: 'squat', page: 1, pageSize: 20, lang: 'en-US' });
 
     expect(response.status).toBe(500);
-    expect(response.body.error).toEqual(
-      expect.objectContaining({
+    expect(response.body).toEqual({
+      error: {
         code: 'internal_error',
         message: 'An unexpected error occurred',
-      }),
-    );
+        status: 500,
+        requestId: expect.any(String),
+      },
+    });
     expect(JSON.stringify(response.body)).not.toContain('contract-secret');
   });
 
@@ -114,9 +116,12 @@ describe('exercise service consumer contract', () => {
     const response = await request(app).get('/health');
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(
-      expect.objectContaining({ status: 'ok', service: 'exercise-microservice' }),
-    );
+    expect(response.body).toEqual({
+      status: 'ok',
+      service: 'exercise-microservice',
+      timestamp: expect.any(String),
+    });
+    expect(Number.isNaN(Date.parse(response.body.timestamp))).toBe(false);
     expect(JSON.stringify(response.body)).not.toMatch(/secret|token|password/i);
   });
 });

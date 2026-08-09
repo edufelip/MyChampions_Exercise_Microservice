@@ -282,7 +282,7 @@ describe('ensureCatalogSynced fail-open behavior', () => {
     });
   });
 
-  it('serves stale active catalog data during search without running request-time sync', async () => {
+  it('serves stale active catalog data when request-time sync and popularity tracking are unavailable', async () => {
     mockedRepo.getActiveCatalogVersion.mockResolvedValue('v1');
     mockedRepo.getCatalogMetadata.mockResolvedValue({
       lastSyncedAt: '2020-01-01T00:00:00.000Z',
@@ -320,7 +320,7 @@ describe('ensureCatalogSynced fail-open behavior', () => {
         },
       },
     ]);
-    mockedRepo.incrementPopularityMany.mockResolvedValue();
+    mockedRepo.incrementPopularityMany.mockRejectedValue(new Error('popularity store unavailable'));
     mockedYMove.forwardToYMove.mockRejectedValue(new Error('upstream should not be called'));
 
     await expect(searchCatalog({ lang: 'en', query: '', page: 1, pageSize: 20 }, 'req-search')).resolves.toMatchObject({

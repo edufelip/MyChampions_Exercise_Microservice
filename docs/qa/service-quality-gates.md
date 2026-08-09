@@ -10,8 +10,10 @@ Required gates:
 - `npm run build`
 - `npm run test:integration`
 - `npm run test:contract`
+- `npm audit --audit-level=high`
 
 The contract suite locks catalog search metadata, review authentication failure,
 health metadata, and secret isolation. Tests use provider and catalog doubles;
 they do not call YMove, Google Translate, Redis, Postgres, or production
-deployment paths.
+deployment paths. The lockfile keeps the audited `js-yaml` transitive packages
+on patched releases so the hosted security scan remains fail-closed.

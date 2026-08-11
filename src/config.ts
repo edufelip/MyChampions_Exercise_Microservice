@@ -75,12 +75,41 @@ function parseFloatEnv(
   return parsed;
 }
 
+const nodeEnv = optionalEnv('NODE_ENV', 'production');
+
+function parseMyChampionsAuthServerUrl(): string | null {
+  const configured = optionalNullableEnv('MYCHAMPIONS_AUTH_SERVER_URL');
+  if (!configured) {
+    if (nodeEnv === 'development') {
+      return 'http://localhost:3400';
+    }
+    if (nodeEnv === 'production') {
+      throw new Error('MYCHAMPIONS_AUTH_SERVER_URL is required in production');
+    }
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error('MYCHAMPIONS_AUTH_SERVER_URL must be an absolute HTTP(S) URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('MYCHAMPIONS_AUTH_SERVER_URL must use HTTP or HTTPS');
+  }
+  return url.toString().replace(/\/$/, '');
+}
+
 export const config = {
   /** TCP port the HTTP server listens on */
   port: parseIntegerEnv('PORT', '3000', { min: 1, max: 65535 }),
 
   /** Node environment */
-  nodeEnv: optionalEnv('NODE_ENV', 'production'),
+  nodeEnv,
+
+  /** Root Bun server used to validate MyChampions bearer sessions for catalog search/detail */
+  mychampionsAuthServerUrl: parseMyChampionsAuthServerUrl(),
 
   /** YMove exercise API key */
   ymoveApiKey: (): string => requireEnv('YMOVE_API_KEY'),

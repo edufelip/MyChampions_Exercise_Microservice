@@ -20,12 +20,21 @@ It syncs top exercise seeds from YMove, machine-translates localized fields, per
 ### Catalog Endpoints
 
 - `POST /catalog/search` – multilingual catalog search with cross-language prefix + typo-tolerant matching
+  - Requires header: `Authorization: Bearer <MyChampions access token>` (validated against `MYCHAMPIONS_AUTH_SERVER_URL`)
 - `GET /catalog/exercises/:id?lang=<locale>` – localized exercise detail by stable exercise ID
+  - Requires header: `Authorization: Bearer <MyChampions access token>` (validated against `MYCHAMPIONS_AUTH_SERVER_URL`)
 - `GET /catalog/health` – catalog readiness and sync freshness with `status` (`ready`, `stale_served`, `redis_unavailable`, `not_ready`, `disabled`)
 - `POST /catalog/review` – update localization status (`reviewed` / `rejected`) and optional localized text fields
   - Requires header: `x-catalog-review-key: <CATALOG_REVIEW_API_KEY>`
 - `POST /catalog/benchmark` – benchmark catalog vs upstream relevance/latency for provided queries
   - Requires header: `x-catalog-review-key: <CATALOG_REVIEW_API_KEY>`
+
+### Authentication
+
+`POST /catalog/search` and `GET /catalog/exercises/:id` require a valid MyChampions bearer session,
+mirroring the food microservice's `authGuard` pattern: the token is validated against the root
+MyChampions server's `GET /me` (`MYCHAMPIONS_AUTH_SERVER_URL`). Missing/malformed headers and
+rejected sessions return `401`; an unreachable auth server returns `503`.
 
 ### `POST /catalog/search` Request Body
 
@@ -102,6 +111,7 @@ Required:
 
 - `YMOVE_API_KEY`
 - `GOOGLE_TRANSLATE_API_KEY`
+- `MYCHAMPIONS_AUTH_SERVER_URL` (required in production; defaults to `http://localhost:3400` in development) – root MyChampions server used to validate bearer sessions for `/catalog/search` and `/catalog/exercises/:id`
 
 Common configuration:
 
@@ -219,3 +229,6 @@ Required GitHub repository secrets:
 - `YMOVE_API_KEY=...`
 - `GOOGLE_TRANSLATE_API_KEY=...`
 - `REDIS_URL=...`
+- `MYCHAMPIONS_AUTH_SERVER_URL=...` – root MyChampions server URL used to validate bearer sessions
+  for `/catalog/search` and `/catalog/exercises/:id`. Required: the service now fails to start in
+  production without it, and the deploy workflow enforces its presence before rolling out.

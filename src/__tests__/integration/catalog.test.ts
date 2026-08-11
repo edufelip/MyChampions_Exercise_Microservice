@@ -3,6 +3,18 @@ import request from 'supertest';
 process.env.CATALOG_REVIEW_API_KEY = 'test-review-key';
 import { createApp } from '../../server';
 
+jest.mock('../../auth/mychampions-auth', () => {
+  class MyChampionsAuthError extends Error {
+    constructor(public readonly code: 'unauthenticated' | 'unavailable') {
+      super(code);
+    }
+  }
+  return {
+    MyChampionsAuthError,
+    verifyMyChampionsAccessToken: jest.fn(),
+  };
+});
+
 jest.mock('../../services/catalog.service', () => {
   class CatalogError extends Error {
     statusCode: number;
@@ -55,21 +67,63 @@ import {
   CatalogBenchmarkError,
   runCatalogProviderBenchmark,
 } from '../../services/provider-benchmark.service';
+import { verifyMyChampionsAccessToken } from '../../auth/mychampions-auth';
 
 const mockedSearchCatalog = searchCatalog as jest.MockedFunction<typeof searchCatalog>;
 const mockedGetCatalogHealth = getCatalogHealth as jest.MockedFunction<typeof getCatalogHealth>;
 const mockedGetCatalogExerciseById = getCatalogExerciseById as jest.MockedFunction<typeof getCatalogExerciseById>;
 const mockedReviewCatalogLocalization = reviewCatalogLocalization as jest.MockedFunction<typeof reviewCatalogLocalization>;
 const mockedRunCatalogProviderBenchmark = runCatalogProviderBenchmark as jest.MockedFunction<typeof runCatalogProviderBenchmark>;
+const mockedVerifyMyChampionsAccessToken = verifyMyChampionsAccessToken as jest.MockedFunction<
+  typeof verifyMyChampionsAccessToken
+>;
 
 const app = createApp();
+const AUTH_HEADER = 'Bearer valid-mychampions-token';
 
 describe('catalog endpoints', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedVerifyMyChampionsAccessToken.mockResolvedValue({ uid: 'user-123' });
   });
 
-  it('POST /catalog/search returns 200 with search payload', async () => {
+  it('POST /catalog/search returns 401 when no Authorization header is sent', async () => {
+    const res = await request(app)
+      .post('/catalog/search')
+      .send({ lang: 'en', query: 'squat', page: 1, pageSize: 5 });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('unauthorized');
+    expect(mockedSearchCatalog).not.toHaveBeenCalled();
+  });
+
+  it('GET /catalog/exercises/:id returns 401 when no Authorization header is sent', async () => {
+    const res = await request(app).get('/catalog/exercises/nonexistent-id-123?lang=en');
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('unauthorized');
+    expect(mockedGetCatalogExerciseById).not.toHaveBeenCalled();
+  });
+
+  it('POST /catalog/search returns 401 when the bearer token is rejected by the auth server', async () => {
+    const { MyChampionsAuthError } = jest.requireMock('../../auth/mychampions-auth') as {
+      MyChampionsAuthError: new (code: 'unauthenticated' | 'unavailable', message: string) => Error;
+    };
+    mockedVerifyMyChampionsAccessToken.mockRejectedValue(
+      new MyChampionsAuthError('unauthenticated', 'invalid token'),
+    );
+
+    const res = await request(app)
+      .post('/catalog/search')
+      .set('Authorization', 'Bearer invalid-token')
+      .send({ lang: 'en', query: 'squat', page: 1, pageSize: 5 });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('unauthorized');
+    expect(mockedSearchCatalog).not.toHaveBeenCalled();
+  });
+
+  it('POST /catalog/search returns 200 with search payload for a valid bearer token', async () => {
     mockedSearchCatalog.mockResolvedValue({
       page: 1,
       pageSize: 20,
@@ -85,6 +139,7 @@ describe('catalog endpoints', () => {
 
     const res = await request(app)
       .post('/catalog/search')
+      .set('Authorization', AUTH_HEADER)
       .send({ lang: 'pt', query: 'supi', page: 1, pageSize: 20 });
 
     expect(res.status).toBe(200);
@@ -95,6 +150,7 @@ describe('catalog endpoints', () => {
   it('POST /catalog/search returns 400 for invalid page', async () => {
     const res = await request(app)
       .post('/catalog/search')
+      .set('Authorization', AUTH_HEADER)
       .send({ lang: 'pt', query: 'supi', page: 'abc' });
 
     expect(res.status).toBe(400);
@@ -106,6 +162,7 @@ describe('catalog endpoints', () => {
 
     const res = await request(app)
       .post('/catalog/search')
+      .set('Authorization', AUTH_HEADER)
       .send({ lang: 'pt', query: 'supi' });
 
     expect(res.status).toBe(503);
@@ -152,7 +209,9 @@ describe('catalog endpoints', () => {
       localizationStatus: 'source',
     });
 
-    const res = await request(app).get('/catalog/exercises/squat-1?lang=en-US');
+    const res = await request(app)
+      .get('/catalog/exercises/squat-1?lang=en-US')
+      .set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe('squat-1');
@@ -163,7 +222,9 @@ describe('catalog endpoints', () => {
   it('GET /catalog/exercises/:id returns 404 when catalog and provider miss', async () => {
     mockedGetCatalogExerciseById.mockResolvedValue(null);
 
-    const res = await request(app).get('/catalog/exercises/missing?lang=en-US');
+    const res = await request(app)
+      .get('/catalog/exercises/missing?lang=en-US')
+      .set('Authorization', AUTH_HEADER);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('not_found');

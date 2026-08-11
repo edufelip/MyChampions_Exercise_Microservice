@@ -12,6 +12,7 @@ import { logger } from './logger';
 import { RedisRateLimitStore } from './infrastructure/rate-limit-store';
 import { proxyDeprecatedController } from './controllers/proxy.controller';
 import { renderPrometheusMetrics } from './observability/metrics';
+import { authGuard } from './middleware/auth-guard';
 import {
   catalogBenchmarkController,
   catalogExerciseDetailController,
@@ -84,8 +85,8 @@ export function createApp(): express.Application {
   });
 
   app.post('/proxy', proxyDeprecatedController);
-  app.post('/catalog/search', validateCatalogSearchBody, searchCatalogController);
-  app.get('/catalog/exercises/:id', catalogExerciseDetailController);
+  app.post('/catalog/search', authGuard, validateCatalogSearchBody, searchCatalogController);
+  app.get('/catalog/exercises/:id', authGuard, catalogExerciseDetailController);
   app.post('/catalog/review', validateCatalogReviewAuth, validateCatalogReviewBody, reviewCatalogController);
   app.post('/catalog/benchmark', validateCatalogReviewAuth, validateCatalogBenchmarkBody, catalogBenchmarkController);
   app.get('/catalog/health', catalogHealthController);

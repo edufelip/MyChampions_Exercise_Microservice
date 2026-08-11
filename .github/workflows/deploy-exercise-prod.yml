@@ -123,7 +123,7 @@ jobs:
             cd /opt/exercise-microservice
             umask 077
             cat > .env.new
-            for k in YMOVE_API_KEY GOOGLE_TRANSLATE_API_KEY REDIS_URL; do
+            for k in YMOVE_API_KEY GOOGLE_TRANSLATE_API_KEY REDIS_URL MYCHAMPIONS_AUTH_SERVER_URL; do
               grep -Eq "^${k}=.+" .env.new || { echo "ERROR: missing or empty ${k} in EXERCISESERVICE_ENV_FILE"; rm -f .env.new; exit 1; }
             done
             POSTGRES_ENV_FILE=/root/mychampions-catalog-postgres-sync.env

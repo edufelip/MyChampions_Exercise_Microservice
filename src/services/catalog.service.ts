@@ -858,7 +858,11 @@ export async function searchCatalog(input: SearchInput, requestId: string): Prom
   const results = docs.map((doc) => mapToCatalogExercise(doc, lang));
 
   if (results.length > 0) {
-    await incrementPopularityMany(lang, results.map((result) => result.id), 1, version);
+    try {
+      await incrementPopularityMany(lang, results.map((result) => result.id), 1, version);
+    } catch (err) {
+      logger.warn({ requestId, err: String(err) }, 'Catalog popularity update failed; serving search results');
+    }
   }
 
   incCounter('catalog_search_requests_total', { lang, status: 'success' });

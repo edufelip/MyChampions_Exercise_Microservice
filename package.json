@@ -10,6 +10,7 @@
     "test": "jest",
     "test:unit": "jest --testPathPattern='src/__tests__/unit'",
     "test:integration": "jest --testPathPattern='src/__tests__/integration'",
+    "test:contract": "jest --testPathPattern='src/__tests__/contract'",
     "migrate:catalog:postgres": "node dist/infrastructure/postgres/migrate-redis-catalog-to-postgres.js",
     "migrate:catalog:postgres:dev": "ts-node src/infrastructure/postgres/migrate-redis-catalog-to-postgres.ts",
     "rebuild:catalog:redis": "node dist/infrastructure/postgres/rebuild-redis-catalog-from-postgres.js",

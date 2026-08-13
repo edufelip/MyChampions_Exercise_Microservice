@@ -122,6 +122,39 @@ jobs:
           path: coverage/
           retention-days: 7
 
+  contract:
+    name: Consumer contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [lint]
+    env:
+      NODE_ENV: test
+      RATE_LIMIT_REDIS_ENABLED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run consumer contract tests
+        run: npm run test:contract -- --detectOpenHandles
+
   build:
     name: TypeScript Build
     runs-on: ubuntu-latest
@@ -153,7 +186,7 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [lint, test, build]
+    needs: [lint, test, contract, build]
     permissions:
       contents: read
       packages: write

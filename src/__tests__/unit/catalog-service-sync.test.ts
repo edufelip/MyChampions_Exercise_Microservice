@@ -6,6 +6,7 @@ import {
   reviewCatalogLocalization,
   searchCatalog,
 } from '../../services/catalog.service';
+import { config } from '../../config';
 import * as repo from '../../infrastructure/catalog-repository';
 import * as ymoveClient from '../../infrastructure/ymove-client';
 import * as translateClient from '../../infrastructure/translate-client';
@@ -720,5 +721,39 @@ describe('ensureCatalogSynced fail-open behavior', () => {
     mockedYMove.forwardToYMove.mockRejectedValue(upstreamMissing);
 
     await expect(getCatalogExerciseById('missing', 'en-US', 'req-detail-404')).resolves.toBeNull();
+  });
+
+  describe('with YMove switched off', () => {
+    beforeEach(() => {
+      (config as { ymoveEnabled: boolean }).ymoveEnabled = false;
+      mockedRepo.getActiveCatalogVersion.mockResolvedValue('v1');
+      mockedRepo.getCatalogMetadata.mockResolvedValue({
+        lastSyncedAt: new Date().toISOString(),
+        exerciseCount: 10,
+      });
+      mockedRepo.getCatalogDocument.mockResolvedValue(null);
+    });
+
+    afterEach(() => {
+      (config as { ymoveEnabled: boolean }).ymoveEnabled = true;
+    });
+
+    it('returns no results on a search miss without calling YMove', async () => {
+      mockedRepo.getIdsByExactToken.mockResolvedValue([]);
+      mockedRepo.getIdsByPrefix.mockResolvedValue([]);
+      mockedRepo.getSynonymTargets.mockResolvedValue([]);
+      mockedRepo.getTokensByPrefix.mockResolvedValue([]);
+      mockedRepo.getPopularityScores.mockResolvedValue({});
+      mockedRepo.getCatalogDocuments.mockResolvedValue([]);
+
+      await expect(searchCatalog({ lang: 'en-US', query: 'agachamento', page: 1, pageSize: 20 }, 'req-off'))
+        .resolves.toMatchObject({ results: [] });
+      expect(mockedYMove.forwardToYMove).not.toHaveBeenCalled();
+    });
+
+    it('returns null on a detail miss without calling YMove', async () => {
+      await expect(getCatalogExerciseById('missing', 'en-US', 'req-off-detail')).resolves.toBeNull();
+      expect(mockedYMove.forwardToYMove).not.toHaveBeenCalled();
+    });
   });
 });

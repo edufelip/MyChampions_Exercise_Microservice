@@ -9,6 +9,7 @@ import { startCatalogSyncScheduler, stopCatalogSyncScheduler } from '../../servi
 jest.mock('../../config', () => ({
   config: {
     catalogEnabled: true,
+    ymoveEnabled: true,
     catalogSyncOnStartup: true,
     catalogSyncBackgroundIntervalMs: 900000,
     catalogStartupSyncCooldownMs: 15552000000,
@@ -62,6 +63,7 @@ describe('catalog-sync-scheduler startup guardrails', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (config as { catalogSyncOnStartup: boolean }).catalogSyncOnStartup = true;
+    (config as { ymoveEnabled: boolean }).ymoveEnabled = true;
 
     setIntervalSpy = jest.spyOn(global, 'setInterval').mockReturnValue(intervalHandle);
   });
@@ -177,5 +179,16 @@ describe('catalog-sync-scheduler startup guardrails', () => {
     expect(mockedYMove.forwardToYMove).not.toHaveBeenCalled();
     expect(mockedCatalogService.ensureCatalogSynced).not.toHaveBeenCalled();
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sync or schedule when YMove is switched off', async () => {
+    (config as { ymoveEnabled: boolean }).ymoveEnabled = false;
+
+    startCatalogSyncScheduler();
+    await flushAsyncWork();
+
+    expect(mockedYMove.forwardToYMove).not.toHaveBeenCalled();
+    expect(mockedCatalogService.ensureCatalogSynced).not.toHaveBeenCalled();
+    expect(setIntervalSpy).not.toHaveBeenCalled();
   });
 });

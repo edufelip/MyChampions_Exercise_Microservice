@@ -177,6 +177,9 @@ export const config = {
     'https://translation.googleapis.com/language/translate/v2',
   ),
 
+  /** YMove toggle: false serves only the stored catalog (no sync, no fill on search/detail misses) */
+  ymoveEnabled: optionalEnv('YMOVE_ENABLED', 'true').toLowerCase() !== 'false',
+
   /** Catalog behavior toggle */
   catalogEnabled: optionalEnv('CATALOG_ENABLED', 'true').toLowerCase() !== 'false',
 

@@ -99,6 +99,11 @@ export function startCatalogSyncScheduler(): void {
     return;
   }
 
+  if (!config.ymoveEnabled) {
+    logger.info('YMove switched off; serving the stored catalog without syncing');
+    return;
+  }
+
   if (config.catalogSyncOnStartup) {
     void runSync('startup');
   }

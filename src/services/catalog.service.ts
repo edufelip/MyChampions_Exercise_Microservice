@@ -580,6 +580,9 @@ async function fillCatalogFromProviderMiss(
   requestId: string,
 ): Promise<CatalogSnapshot> {
   const snapshot = await getOrCreateWritableCatalogSnapshot(requestId);
+  if (!config.ymoveEnabled) {
+    return snapshot;
+  }
   const providerExercises = await fetchProviderExercisesForQuery(query, pageSize, requestId);
   if (providerExercises.length === 0) {
     return snapshot;
@@ -981,6 +984,9 @@ export async function getCatalogExerciseById(
   const existing = await getCatalogDocument(id, snapshot.version);
   if (existing) {
     return mapToCatalogExercise(existing, lang);
+  }
+  if (!config.ymoveEnabled) {
+    return null;
   }
 
   let upstream;
